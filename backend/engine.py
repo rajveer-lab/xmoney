@@ -223,7 +223,13 @@ STOP_LOSS_MIN_PCT         = float(os.environ.get("STOP_LOSS_MIN_PCT", 0.05))
 # After a stop, wait before re-entering the same coin. Without this the engine
 # reopens the identical setup on the very next tick and loops on it.
 STOP_COOLDOWN_SEC         = float(os.environ.get("STOP_COOLDOWN_SEC", 120.0))
-# Below this, an entry deviation is noise and "convergence" is not a meaningful exit
+# A gap only means something if it is bigger than the coin's own jitter. A flat
+# floor cannot express that: 0.005% is a wide gap on BTC and pure noise on a thin
+# alt. One ZEC position opened on a 0.0074% gap, read a single tick as "converged
+# 182%", exited 10ms later and lost money, because ordinary movement on that coin
+# exceeded the entire gap. So the floor is expressed in the coin's own lurches.
+MIN_CONVERGENCE_JUMPS     = float(os.environ.get("MIN_CONVERGENCE_JUMPS", 2.0))
+# Absolute backstop underneath that, for a coin whose jitter is immeasurably small
 MIN_CONVERGENCE_DEV_PCT   = float(os.environ.get("MIN_CONVERGENCE_DEV_PCT", 0.005))
 # Skip coins whose gap routinely travels further than funding could ever pay for.
 # The stop sits at 2x the funding we are waiting to collect, so if that distance
@@ -1620,7 +1626,14 @@ def check_exit_on_tick(cs, snap):
         entry_gap     = pos["entry_deviation"]
         moved_our_way = (entry_gap - curr_deviation) * pos["direction"]
         conv_open     = entry_gap * pos["direction"] > 0
-        banked = (abs_entry_dev >= MIN_CONVERGENCE_DEV_PCT and conv_open
+        # Is this gap big enough for "converged" to mean anything on this coin?
+        # Below a couple of its own lurches it is not a gap, it is jitter, and
+        # every convergence test downstream would be reading noise.
+        lurch = basis_jump_pct(cs)
+        conv_floor = max(MIN_CONVERGENCE_DEV_PCT,
+                         MIN_CONVERGENCE_JUMPS * lurch if lurch else 0.0)
+        conv_meaningful = abs_entry_dev >= conv_floor
+        banked = (conv_meaningful and conv_open
                   and moved_our_way >= abs_entry_dev * REVERSION_FRACTION)
 
         if banked and net > 0:
@@ -1629,7 +1642,11 @@ def check_exit_on_tick(cs, snap):
             if fv_now is not None:
                 rate_now, _secs, _iv = fv_now
                 still_to_come = rate_now if pos["direction"] == +1 else -rate_now
-            if still_to_come < net:
+            # The gain has to survive the trip to the exit. Banking a profit
+            # thinner than one lurch just pays the spread to lock in noise: the
+            # ZEC exit triggered on +0.0129% and filled at -0.0014%.
+            worth_banking = net > still_to_come + (lurch or 0.0)
+            if worth_banking:
                 with cs.lock:
                     if cs.open_position is None or cs.exit_pending:
                         return
@@ -1650,19 +1667,14 @@ def check_exit_on_tick(cs, snap):
 
         # Funding is banked; now let the convergence leg pay out.
         #
-        # Which way counts depends on the side we are on, not on distance from
-        # zero. A short perp profits as the gap falls, a long perp as it rises.
-        # Measuring |gap| shrinking treated a gap running our way as though it
-        # were going wrong, and a gap closing against us as though we were
-        # winning, which is why a profitable position could read "gap widened".
-        entry_gap = pos["entry_deviation"]
-        moved_our_way = (entry_gap - curr_deviation) * pos["direction"]
-        # A gap only pays us as it closes when it starts on our side. Sitting the
-        # wrong way round, closing it costs us, so there is nothing to wait for.
-        conv_available = entry_gap * pos["direction"] > 0
-
-        if abs_entry_dev < MIN_CONVERGENCE_DEV_PCT or not conv_available:
-            # No convergence to collect: leave as soon as we are in the black.
+        # entry_gap, moved_our_way, conv_open and conv_meaningful were all worked
+        # out above. Which way counts depends on the side we are on, not on
+        # distance from zero: a short perp profits as the gap falls, a long perp
+        # as it rises. Measuring |gap| shrinking treated a gap running our way as
+        # though it were going wrong, so a profitable position read "gap widened".
+        if not conv_meaningful or not conv_open:
+            # The gap is either jitter or on the wrong side, so there is no
+            # convergence to collect: leave as soon as we are in the black.
             converged = net >= 0
         else:
             converged = moved_our_way >= abs_entry_dev * REVERSION_FRACTION

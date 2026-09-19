@@ -1006,3 +1006,66 @@ def test_the_stop_cannot_close_a_winning_trade(eng, monkeypatch):
     xs2, xp2 = E.get_exit_vwap(E.get_fill_snap(cs), +1, 1000.0)
     _, inflated, _ = E.calc_pnl(pos, xs2, xp2, 0.0)
     assert inflated > baseline
+
+
+def test_convergence_ignores_gaps_smaller_than_the_coins_own_jitter(eng, monkeypatch):
+    """A flat floor cannot tell a wide gap on BTC from pure noise on a thin alt.
+    One ZEC position opened on a 0.0074% gap, read a single tick as 'converged
+    182%', exited 10ms later and lost money, because ordinary movement on that
+    coin exceeded the whole gap."""
+    monkeypatch.setattr(E, "MIN_CONVERGENCE_JUMPS", 2.0)
+    monkeypatch.setattr(E, "MIN_CONVERGENCE_DEV_PCT", 0.0)
+    monkeypatch.setattr(E, "MIN_VOL_SAMPLES", 10)
+    monkeypatch.setattr(E, "REVERSION_FRACTION", 0.9)
+
+    def coin_with_jitter(step):
+        cs = make_coin()
+        for i in range(40):
+            cs.buckets.append({"spread_pct": step if i % 2 else -step})
+        E.process_spot_tick(cs, book(100.0))
+        E.process_perp_tick(cs, book(100.0))      # gap now ~0, so "fully converged"
+        return cs
+
+    # gap of 0.008% on a coin that lurches 0.02% a tick: jitter, not convergence
+    noisy = coin_with_jitter(0.01)                 # ~0.02% per step
+    assert E.basis_jump_pct(noisy) > 0.008
+    noisy.open_position = make_funding_pos(direction=+1, entry_deviation=0.008,
+                                           entry_mean=0.0, stamps_crossed=0,
+                                           entry_spot_fill=99.9, entry_perp_fill=100.1,
+                                           stop_loss_pct=5.0, entry_mark_pct=0.0)
+    set_funding(noisy, 0.001, 600, calm=False)
+    E.check_exit_on_tick(noisy, E.get_fill_snap(noisy))
+    assert not noisy.exit_pending, "must not bank convergence on jitter"
+
+    # same gap on a coin that barely moves: now it is a real dislocation
+    calm = coin_with_jitter(0.0005)                # ~0.001% per step
+    assert E.basis_jump_pct(calm) < 0.004
+    calm.open_position = make_funding_pos(direction=+1, entry_deviation=0.008,
+                                          entry_mean=0.0, stamps_crossed=0,
+                                          entry_spot_fill=99.9, entry_perp_fill=100.1,
+                                          stop_loss_pct=5.0, entry_mark_pct=0.0)
+    set_funding(calm, 0.0001, 600, calm=False)
+    E.check_exit_on_tick(calm, E.get_fill_snap(calm))
+    assert calm.exit_pending, "a real gap on a calm coin should still bank"
+
+
+def test_a_profit_thinner_than_one_lurch_is_not_worth_banking(eng, monkeypatch):
+    """Banking a gain smaller than the coin's own tick just pays the spread to
+    lock in noise: the ZEC exit triggered at +0.0129% and filled at -0.0014%."""
+    monkeypatch.setattr(E, "MIN_CONVERGENCE_JUMPS", 0.0)
+    monkeypatch.setattr(E, "MIN_CONVERGENCE_DEV_PCT", 0.0)
+    monkeypatch.setattr(E, "MIN_VOL_SAMPLES", 10)
+    monkeypatch.setattr(E, "REVERSION_FRACTION", 0.9)
+    cs = make_coin()
+    for i in range(40):                            # lurches ~0.10% a tick
+        cs.buckets.append({"spread_pct": 0.05 if i % 2 else -0.05})
+    E.process_spot_tick(cs, book(100.0))
+    E.process_perp_tick(cs, book(100.0))
+    # fully converged and in profit, but the profit is far thinner than a lurch
+    cs.open_position = make_funding_pos(direction=+1, entry_deviation=0.50,
+                                        entry_mean=0.0, stamps_crossed=0,
+                                        entry_spot_fill=99.999, entry_perp_fill=100.001,
+                                        stop_loss_pct=5.0, entry_mark_pct=0.0)
+    set_funding(cs, 0.0001, 600, calm=False)
+    E.check_exit_on_tick(cs, E.get_fill_snap(cs))
+    assert not cs.exit_pending
