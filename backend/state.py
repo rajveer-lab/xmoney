@@ -60,7 +60,20 @@ def _coin_row(cs, now, feed_of):
         stop_sigmas = _stop / vol
 
     spread, sm, pm = _spread_pct(latest)
-    ready = bool(bs["ready"])
+    # What "ready" means depends on the strategy. The funding engine never waits
+    # for the rolling window: it needs a cost estimate and a measure of how far
+    # this gap normally travels, and both of those arrive within seconds. Reusing
+    # the spread strategy's warm-up left 162 of 172 coins reading "warming" while
+    # they were perfectly able to trade.
+    if E.STRATEGY == "spread":
+        ready    = bool(bs["ready"])
+        warm_pct = min(100.0, n_buckets / cs.rolling_win * 100)
+    else:
+        have_cost = (st["live_round_trip"] or 0) > 0
+        have_vol  = vol is not None
+        ready     = have_cost and have_vol
+        warm_pct  = min(1.0 if have_cost else 0.0,
+                        min(1.0, n_buckets / max(E.MIN_VOL_SAMPLES, 1))) * 100
     mean, std = bs["roll_mean"], bs["roll_std"]
     z = None
     if ready and spread is not None and std:
@@ -150,7 +163,7 @@ def _coin_row(cs, now, feed_of):
         "symbol"        : cs.symbol,
         "state"         : state,
         "tier_sec"      : cs.bucket_sec,
-        "warm_pct"      : _f(min(100.0, n_buckets / cs.rolling_win * 100), 1),
+        "warm_pct"      : _f(warm_pct, 1),
         "spread_pct"    : _f(spread),
         "mean_pct"      : _f(mean),
         "std_pct"       : _f(std),

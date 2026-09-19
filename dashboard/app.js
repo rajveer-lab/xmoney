@@ -222,9 +222,9 @@
     setText($("#k-notional"), "$" + Math.round(g.notional || 0).toLocaleString("en-US"));
     setText($("#k-open"), fmtInt(g.open_count));
     setText($("#k-deployed"), g.open_count ? fmtUsd(g.deployed_usd, false) + " deployed" : "Flat");
-    setText($("#k-ready"), (g.coins_funded ?? g.coins_ready) + "/" + g.coins_total);
+    setText($("#k-ready"), g.coins_ready + "/" + g.coins_total);
     const sc = g.state_counts || {};
-    setText($("#k-ready-sub"), (sc.warming || 0) + (sc.connecting || 0) + " warming · " +
+    setText($("#k-ready-sub"), (g.coins_funded ?? 0) + " with a live funding rate · " +
       ((sc.stale || 0) + (sc.offline || 0) + (sc.unlisted || 0)) + " no feed");
 
     document.title = (g.closed ? fmtUsd(g.net_usd) + " · " : "") + "xmoney Funding Capture";

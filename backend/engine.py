@@ -51,8 +51,8 @@ init(autoreset=True)
 # grow: the filters decide what is worth trading, not this list.
 COINS = [
     # ── Seed set: the cross-exchange funding scan plus hand-picked volatiles ──
-    "XTZ", "LSK", "ONE", "AVA", "CAP", "SIREN",
-    "VELVET", "KAT", "SOL", "AVAX", "LINK", "NEAR",
+    "XTZ", "LSK", "ONE", "AVA",
+    "KAT", "SOL", "AVAX", "LINK", "NEAR",
     "SUI", "ADA", "DOGE", "SEI", "INJ", "TIA",
     "OP", "ZK", "STX", "ATOM", "FLOW", "CFX",
     "ASTR", "CELO", "IMX", "THETA", "ICP", "AR",
