@@ -89,17 +89,19 @@ def test_vwap_fill_walks_levels_and_reports_partial():
 
 
 def test_calc_pnl_both_directions():
+    # Fills are real book prices, so the spread is already inside gross; net only
+    # adds funding and subtracts the fees actually paid.
     # long spot / short perp: spot flat, perp fell 100.3 → 100.0 (leg is measured vs the perp entry price)
     long_pos = {"direction": 1, "entry_spot_fill": 100.0, "entry_perp_fill": 100.3, "notional_usd": 1000.0}
     gross, net, usd = E.calc_pnl(long_pos, 100.0, 100.0, 0.1)
     expect = (100.3 - 100.0) / 100.3 * 100
-    assert gross == pytest.approx(expect, abs=1e-9) and net == pytest.approx(expect - 0.1, abs=1e-9)
+    assert gross == pytest.approx(expect, abs=1e-9) and net == pytest.approx(expect, abs=1e-9)
     assert usd == pytest.approx(net / 100 * 1000.0, abs=1e-9)
     # short spot / long perp: perp rose back 99.7 → 100.0
     short_pos = {"direction": -1, "entry_spot_fill": 100.0, "entry_perp_fill": 99.7, "notional_usd": 1000.0}
     gross, net, _ = E.calc_pnl(short_pos, 100.0, 100.0, 0.1)
     expect = (100.0 - 99.7) / 99.7 * 100
-    assert gross == pytest.approx(expect, abs=1e-9) and net == pytest.approx(expect - 0.1, abs=1e-9)
+    assert gross == pytest.approx(expect, abs=1e-9) and net == pytest.approx(expect, abs=1e-9)
     # a losing exit: spread widened further
     gross, net, usd = E.calc_pnl(long_pos, 100.0, 100.6, 0.1)
     assert gross < 0 and net < 0 and usd < 0
@@ -481,9 +483,9 @@ def test_funding_gate_rejects_a_good_rate_that_is_a_bad_rate_of_return(eng, monk
     cs = make_coin()
     monkeypatch.setattr(E, "FUNDING_EXIT_GRACE_SEC", 0.0)   # isolate the countdown
     set_funding(cs, 0.05, 60)                      # 0.05% in a minute → huge APR
-    assert E.funding_entry_check(cs, 0.0, 0.0) is not None
+    assert E.funding_entry_check(cs, 1e-6, 0.0) is not None
     set_funding(cs, 0.05, 24 * 3600)               # same 0.05%, but a day of capital
-    assert E.funding_entry_check(cs, 0.0, 0.0) is None
+    assert E.funding_entry_check(cs, 1e-6, 0.0) is None
 
 
 def test_funding_settles_with_the_right_sign_when_a_stamp_passes(eng):
@@ -563,9 +565,9 @@ def test_convergence_is_priced_into_the_funding_entry(eng, monkeypatch):
     cs = make_coin()
     set_funding(cs, 0.05, 600)                  # positive → direction +1
 
-    _, _, _, aligned = E.funding_entry_check(cs, 0.0, +0.02)
+    _, _, _, aligned = E.funding_entry_check(cs, 1e-6, +0.02)
     assert aligned == pytest.approx(0.02 * 0.9)      # spread above mean: helps
-    _, _, _, adverse = E.funding_entry_check(cs, 0.0, -0.02)
+    _, _, _, adverse = E.funding_entry_check(cs, 1e-6, -0.02)
     assert adverse == pytest.approx(-0.02 * 0.9)     # below mean: works against us
 
 
@@ -579,8 +581,8 @@ def test_adverse_convergence_is_taken_when_funding_still_pays_for_it(eng, monkey
     cs = make_coin()
     set_funding(cs, 0.10, 600)                  # direction +1, collects 0.10%
 
-    assert E.funding_entry_check(cs, 0.0, -0.05) is not None   # adverse but covered
-    assert E.funding_entry_check(cs, 0.0, -0.20) is None       # adverse and not covered
+    assert E.funding_entry_check(cs, 1e-6, -0.05) is not None   # adverse but covered
+    assert E.funding_entry_check(cs, 1e-6, -0.20) is None       # adverse and not covered
 
 
 def test_funding_exit_waits_for_convergence_instead_of_first_profit(eng, monkeypatch):
@@ -636,3 +638,26 @@ def test_stop_loss_scales_with_the_funding_being_collected(eng, monkeypatch):
     monkeypatch.setattr(E, "STOP_LOSS_MIN_PCT", 0.05)
     assert max(2.0 * abs(-0.30), 0.05) == pytest.approx(0.60)   # fat funding, wider stop
     assert max(2.0 * abs(0.001), 0.05) == pytest.approx(0.05)   # thin funding, floor
+
+
+def test_funding_gate_refuses_to_trade_before_costs_are_known(eng):
+    """get_round_trip_pct() reports 0 until it has bid-ask samples. Zero is
+    'unknown', not 'free' — entering against it opened trades whose spread was
+    several times the funding they could ever collect."""
+    cs = make_coin()
+    set_funding(cs, 0.05, 600)
+    assert E.funding_entry_check(cs, 0.0, 0.0) is None     # no cost estimate yet
+    assert E.funding_entry_check(cs, 0.01, 0.0) is not None
+
+
+def test_spread_is_not_charged_twice(eng, monkeypatch):
+    """Entry and exit fills are real book prices, so the crossing cost is already
+    inside gross. Charging live friction on top of it stopped trades out at birth."""
+    monkeypatch.setattr(E, "FEE_TIER", "ZERO")
+    pos = {"direction": +1, "entry_spot_fill": 100.0, "entry_perp_fill": 100.0,
+           "notional_usd": 1000.0, "funding_collected_pct": 0.0,
+           "entry_spot_fill_type": "taker", "entry_perp_fill_type": "taker"}
+    # Same fills, wildly different friction estimates → identical realised PnL.
+    _, net_a, _ = E.calc_pnl(pos, 100.0, 100.0, 0.0)
+    _, net_b, _ = E.calc_pnl(pos, 100.0, 100.0, 0.5)
+    assert net_a == pytest.approx(net_b) == pytest.approx(0.0)

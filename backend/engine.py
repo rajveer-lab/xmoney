@@ -443,7 +443,8 @@ def run_funding_poller(all_cs):
     by_symbol = {f"{cs.symbol.upper()}USDT": cs for cs in all_cs}
     name = "funding-rest"
     feed = FEEDS.setdefault(name, {
-        "name": name, "leg": "funding", "cs": [], "coins": [], "quotes": False,
+        "name": name, "leg": "funding", "cs": list(all_cs),
+        "coins": [cs.symbol for cs in all_cs], "quotes": False,
         "status": "init", "opened_at": None, "last_msg": None, "msgs": 0, "rate": 0,
         "connects": 0, "errors": 0, "last_error": None, "last_error_at": None,
         "lag_ms": None, "lag_max_ms": None, "lag_sum": 0.0, "lag_n": 0, "lag_max": 0.0, "ws": None,
@@ -907,14 +908,15 @@ def calc_pnl(pos, exit_spot, exit_perp, round_trip_pct,
         perp_leg = (exit_perp - ep) / ep * 100
     gross = spot_leg + perp_leg
 
-    # round_trip_pct = rolling bid-ask estimate + a gate-time fee assumption.
-    # Strip that assumed fee back out and charge what the four fills actually
-    # cost, which depends on whether each one rested or crossed.
-    spread_component = round_trip_pct - round_trip_fee_pct()
-    fees_pct         = realised_fee_pct(pos, exit_spot_type, exit_perp_type)
-    funding_pct      = pos.get("funding_collected_pct", 0.0)
+    # gross runs entry fill → exit fill, and those are real prices off the book:
+    # a crossing fill already paid the spread, a resting fill already earned it.
+    # round_trip_pct is the *pre-trade estimate* of that same cost and belongs in
+    # the entry gates, not here — subtracting it again charged every trade the
+    # spread twice, which on a wide-spread coin stopped positions out at birth.
+    fees_pct    = realised_fee_pct(pos, exit_spot_type, exit_perp_type)
+    funding_pct = pos.get("funding_collected_pct", 0.0)
 
-    net = gross + funding_pct - spread_component - fees_pct
+    net = gross + funding_pct - fees_pct
     usd = net / 100 * pos["notional_usd"]
     return gross, net, usd
 
@@ -1303,6 +1305,13 @@ def funding_entry_check(cs, round_trip, deviation):
     if fv is None:
         return None
     rate_pct, secs_to_stamp, interval_h = fv
+
+    # get_round_trip_pct() reports 0 until it has five bid-ask samples per leg.
+    # Funding entries skip the 500s rolling warm-up on purpose, so without this
+    # they also skip the point where cost becomes knowable — and a coin with a
+    # 0.16% spread reads as free, which clears every hurdle below trivially.
+    if round_trip <= 0:
+        return None
 
     if abs(rate_pct) < MIN_FUNDING_PCT:
         return None
