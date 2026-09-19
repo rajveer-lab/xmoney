@@ -125,6 +125,7 @@
     renderCoins(st);
     renderFeeds(st);
     renderConfig(st);
+    renderFeeTier(st);
     if (st.trade_head !== S.lastSeq) syncTrades(st.trade_head);
   }
 
@@ -754,8 +755,207 @@
     }
   });
 
+  // ── strategy explainer ────────────────────────────────────────────────────
+  const STRAT_STEPS = [
+    {
+      key: "find", tag: "1", title: "Find a coin that pays you to wait",
+      body: "A perpetual is a copy of the real coin that never expires. To keep its price glued to the real one, " +
+            "the exchange makes one side pay the other every few hours. That payment is called funding — and it is " +
+            "published in advance, so we can see exactly what we would be paid before risking anything.",
+      points: [
+        "We watch 72 small and mid-cap coins, where these payments are biggest.",
+        "Some settle every 8 hours, some every 4, a couple every hour — the faster ones pay more often.",
+        "We only act when the payment is at least 1.5× what it costs us to trade.",
+      ],
+    },
+    {
+      key: "enter", tag: "2", title: "Buy one side, sell the other, same moment",
+      body: "We buy the real coin and sell the perpetual at the same time, in equal size. Now the price can do " +
+            "whatever it likes: if it halves, one side loses exactly what the other side makes. We are not betting " +
+            "on the coin going up or down — we have no opinion at all.",
+      points: [
+        "Equal size, opposite directions — the price risk cancels out.",
+        "We try to sit patiently at the best price first; if nobody trades with us in 200ms, we pay up and cross.",
+        "If only one side fills we immediately complete the other, so we are never left exposed.",
+      ],
+    },
+    {
+      key: "collect", tag: "3", title: "Hold through the payment and collect",
+      body: "Funding only pays whoever is holding at the exact settlement second — not a minute before, not after. " +
+            "So once we are in, we sit still and wait for that moment. This is the first of our two paychecks.",
+      points: [
+        "Nothing closes the position before the payment, because the payment is the whole point.",
+        "We enter close to the settlement time so our money isn't tied up longer than it needs to be.",
+        "If the rate flips against us before it settles, we record that honestly as a cost — not a profit.",
+      ],
+    },
+    {
+      key: "exit", tag: "4", title: "Get paid a second time as the gap closes",
+      body: "The two prices had drifted apart, and they tend to snap back together. Because we are long the cheap " +
+            "one and short the expensive one, that snapping-back is pure profit on top of the funding. When most " +
+            "of the gap has closed, there is nothing left to earn, so we leave.",
+      points: [
+        "We wait until about 90% of the gap has closed instead of grabbing the first small profit.",
+        "Two paychecks from one position: the funding payment, plus the gap closing.",
+        "Safety net: if the gap instead widens past twice what funding was going to pay, we cut the trade.",
+      ],
+    },
+  ];
+
+  // x stops short of the 760 viewBox so the gap callouts either side stay inside it
+  const STRAT_PTS = [
+    { x:  95, spot:  70, gap: 60 },
+    { x: 185, spot:  76, gap: 56 },
+    { x: 275, spot: 180, gap: 50 },
+    { x: 365, spot: 196, gap: 46 },
+    { x: 455, spot: 150, gap: 34 },
+    { x: 545, spot: 126, gap: 24 },
+    { x: 635, spot: 116, gap: 16 },
+  ];
+  const STRAT_ENTRY = 1, STRAT_STAMP = 4, STRAT_EXIT = 6;
+
+  function drawStrategyChart(stepKey) {
+    const host = $("#strat-chart");
+    if (!host) return;
+    host.textContent = "";
+    const W = 760, H = 300;
+    const root = svg("svg", { viewBox: `0 0 ${W} ${H}`, class: "strat-svg", role: "img",
+                              "aria-label": "One trade from entry to exit" }, host);
+
+    const line = (sel) => STRAT_PTS.map((p, i) => (i ? "L" : "M") + p.x + " " + sel(p)).join(" ");
+    const spotY = (p) => p.spot, perpY = (p) => p.spot + p.gap;
+
+    // the gap between the two prices — this is what we earn as it narrows
+    const band = STRAT_PTS.map((p) => p.x + " " + spotY(p)).join(" L ") + " L " +
+                 [...STRAT_PTS].reverse().map((p) => p.x + " " + perpY(p)).join(" L ");
+    const dim = (on) => (on ? "1" : "0.28");
+
+    svg("path", { d: "M " + band + " Z", class: "strat-band",
+                  opacity: stepKey === "exit" ? "0.75" : "0.3" }, root);
+    svg("path", { d: line(spotY), class: "strat-line strat-spot",
+                  opacity: dim(stepKey !== "find") }, root);
+    svg("path", { d: line(perpY), class: "strat-line strat-perp",
+                  opacity: dim(stepKey !== "find") }, root);
+
+    const label = (x, y, text, cls) => {
+      const t = svg("text", { x, y, class: "strat-label " + (cls || "") }, root);
+      t.textContent = text;
+      return t;
+    };
+    label(20, 46, "Real coin (spot)", "strat-t-spot");
+    label(20, 290, "Perpetual — trading cheaper here", "strat-t-perp");
+
+    // price crashes mid-chart and both legs fall together: that is the whole point
+    const crash = STRAT_PTS[3];
+    svg("path", { d: `M ${crash.x} ${spotY(crash) - 34} l 0 26`, class: "strat-arrow",
+                  "marker-end": "url(#strat-ar)" }, root);
+    const defs = svg("defs", {}, root);
+    const mk = svg("marker", { id: "strat-ar", viewBox: "0 0 10 10", refX: "8", refY: "5",
+                               markerWidth: "6", markerHeight: "6", orient: "auto" }, defs);
+    svg("path", { d: "M 0 0 L 10 5 L 0 10 z", class: "strat-arrow-head" }, mk);
+    label(crash.x + 8, spotY(crash) - 30, "price crashes — we don't care", "strat-t-muted");
+
+    // funding settlement
+    const stamp = STRAT_PTS[STRAT_STAMP];
+    const hot = stepKey === "collect";
+    svg("line", { x1: stamp.x, y1: 40, x2: stamp.x, y2: 262,
+                  class: "strat-stamp", opacity: hot ? "1" : "0.35" }, root);
+    const badge = svg("g", { opacity: hot ? "1" : "0.45" }, root);
+    svg("rect", { x: stamp.x - 62, y: 52, width: 124, height: 24, rx: 12, class: "strat-badge" }, badge);
+    const bt = svg("text", { x: stamp.x, y: 68, class: "strat-badge-t" }, badge);
+    bt.textContent = "funding paid";
+
+    const dot = (i, cls, text, on) => {
+      const p = STRAT_PTS[i];
+      const y = (spotY(p) + perpY(p)) / 2;
+      const g = svg("g", { opacity: on ? "1" : "0.4" }, root);
+      svg("circle", { cx: p.x, cy: y, r: 7, class: "strat-dot " + cls }, g);
+      const t = svg("text", { x: p.x, y: y - 14, class: "strat-dot-t" }, g);
+      t.textContent = text;
+    };
+    dot(STRAT_ENTRY, "in",  "enter", stepKey === "enter");
+    dot(STRAT_EXIT,  "out", "exit",  stepKey === "exit");
+
+    if (stepKey === "exit" || stepKey === "find") {
+      const a = STRAT_PTS[STRAT_ENTRY], b = STRAT_PTS[STRAT_EXIT];
+      const ga = svg("g", { class: "strat-gaps" }, root);
+      svg("line", { x1: a.x - 22, y1: spotY(a), x2: a.x - 22, y2: perpY(a) }, ga);
+      svg("line", { x1: b.x + 22, y1: spotY(b), x2: b.x + 22, y2: perpY(b) }, ga);
+      const t1 = svg("text", { x: a.x - 28, y: (spotY(a) + perpY(a)) / 2, class: "strat-gap-t r" }, ga);
+      t1.textContent = "wide gap";
+      const t2 = svg("text", { x: b.x + 28, y: (spotY(b) + perpY(b)) / 2, class: "strat-gap-t" }, ga);
+      t2.textContent = "gap closed";
+    }
+  }
+
+  function renderStrategy() {
+    const wrap = $("#strat-steps");
+    if (!wrap || wrap.dataset.built) return;
+    wrap.dataset.built = "1";
+    STRAT_STEPS.forEach((st, i) => {
+      const b = el("button", "strat-step" + (i === 0 ? " on" : ""));
+      b.type = "button";
+      b.dataset.key = st.key;
+      b.innerHTML = "";
+      const n = el("span", "strat-num", st.tag);
+      const tx = el("span", "strat-step-t", st.title);
+      b.append(n, tx);
+      b.addEventListener("click", () => selectStratStep(st.key));
+      wrap.appendChild(b);
+    });
+    selectStratStep(STRAT_STEPS[0].key);
+  }
+
+  function selectStratStep(key) {
+    const st = STRAT_STEPS.find((s) => s.key === key) || STRAT_STEPS[0];
+    document.querySelectorAll(".strat-step").forEach((b) => {
+      b.classList.toggle("on", b.dataset.key === st.key);
+    });
+    const note = $("#strat-note");
+    note.textContent = "";
+    note.appendChild(el("h3", "", st.title));
+    note.appendChild(el("p", "", st.body));
+    const ul = el("ul", "strat-points");
+    st.points.forEach((p) => ul.appendChild(el("li", "", p)));
+    note.appendChild(ul);
+    drawStrategyChart(st.key);
+  }
+
+  // live fee-tier switch — the whole point is showing it still works with real fees
+  function renderFeeTier(stt) {
+    const sel = $("#fee-tier");
+    const c = stt.config;
+    if (!sel || !c || !c.fee_tiers) return;
+    if (!sel.dataset.built) {
+      sel.dataset.built = "1";
+      c.fee_tiers.forEach((t) => {
+        const o = el("option", "", t === "ZERO" ? "ZERO (spread only)" : t);
+        o.value = t;
+        sel.appendChild(o);
+      });
+      sel.addEventListener("change", async () => {
+        sel.disabled = true;
+        try {
+          const r = await fetch("/api/control/fee_tier", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tier: sel.value }),
+          });
+          if (!r.ok) throw new Error("HTTP " + r.status);
+        } catch (e) {
+          $("#fee-live").textContent = "could not switch (" + e.message + ")";
+        } finally {
+          sel.disabled = false;
+        }
+      });
+    }
+    if (document.activeElement !== sel) sel.value = c.fee_tier;
+    $("#fee-live").textContent =
+      "round trip — maker " + fmtNum(c.fee_rt_maker, 4) + "% · taker " + fmtNum(c.fee_rt_taker, 4) + "%";
+  }
+
   // ── boot ──────────────────────────────────────────────────────────────────
   selectTab("coins");
+  renderStrategy();
   drawChart();
   renderTrades();
   connect();

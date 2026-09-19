@@ -42,38 +42,31 @@ init(autoreset=True)
 # COIN LIST — 47 coins (29 original + 18 from scanner screenshots)
 # ══════════════════════════════════════════════════════════════════════════════
 
+# Small- and mid-cap, volatile pairs — the ones that actually carry funding.
+# Anything not listed on BOTH Binance spot and USDⓈ-M futures is detected at
+# startup by seed_books() and flagged "Not listed"; it simply never trades.
 COINS = [
-    # 143 coins — scanner-validated (both spot+perp BA < 0.10%)
-    # "币安人生" excluded (non-ASCII ticker); USDC removed (stablecoin — USDCUSDT is pegged, nothing to revert)
-    "BTC", "PAXG", "XAUT", "ETH",
-    "BNB", "ZEC", "XRP", "XPL", "AAVE",
-    "DOGE", "LINK", "HBAR", "POL", "SUI",
-    "SOL", "JTO", "AVAX", "PENGU", "TRX",
-    "SEI", "ALLO", "VIRTUAL", "WLD", "SAND",
-    "INJ", "LTC", "GENIUS", "TAO", "RE",
-    "TIA", "SKY", "BCH", "DASH", "XLM",
-    "NIGHT", "MEGA", "ONDO", "VET", "NEIRO",
-    "ESP", "UNI", "ONT", "ZEN", "JST",
-    "2Z", "BOME", "LDO", "GIGGLE", "TRB",
-    "BANANAS31", "MORPHO", "GALA", "API3", "PENDLE",
-    "LINEA", "SYRUP", "JUP", "EIGEN", "QNT",
-    "PYTH", "AIGENSYN", "ICP", "FF", "CFX",
-    "ORDI", "WCT", "XTZ", "BICO", "HOME",
-    "ZAMA", "S", "CAKE", "DEXE", "ENJ",
-    "CHIP", "SCR", "MMT", "CRV", "DYDX",
-    "FLOW", "NEAR", "BIO", "AR", "SYN",
-    "CHZ", "EDEN", "NXPC", "CGPT", "OPEN",
-    "KAVA", "BANANA", "FET", "STX", "TRUMP",
-    "HAEDAL", "ATOM", "LPT", "COMP", "MET",
-    "VANRY", "RENDER", "KAITO", "OGN", "OPG",
-    "YGG", "ASTR", "WIF", "BAND", "ADA",
-    "HMSTR", "BLUR", "SFP", "TST", "CELO",
-    "CFG", "BARD", "HUMA", "APE", "VELODROME",
-    "SENT", "THETA", "IMX", "PORTAL", "BEAMX",
-    "BABY", "ZBT", "EUL", "PUMP", "RSR",
-    "SAHARA", "ALICE", "FOGO", "ARKM", "BMT",
-    "ORCA", "ARK", "VANA", "OP", "ZK",
-    "AXS", "AVNT", "CVC", "GAS",
+    # ── From the cross-exchange funding scan ─────────────────────────────────
+    # These were ranked on Bybit/OKX vs Binance, so several may be missing from
+    # Binance spot. Startup will tell you which ones drop out.
+    "XTZ", "LSK", "ONE", "AVA", "CAP", "SIREN", "VELVET", "KAT",
+
+    # ── Majors: liquid anchors, tight books, funding flips often ─────────────
+    "SOL", "AVAX", "LINK", "NEAR", "SUI", "ADA", "DOGE",
+
+    # ── Mid-cap L1/L2 and DeFi ───────────────────────────────────────────────
+    "SEI", "INJ", "TIA", "OP", "ZK", "STX", "ATOM", "FLOW",
+    "CFX", "ASTR", "CELO", "IMX", "THETA", "ICP", "AR",
+
+    # ── DeFi / infra ─────────────────────────────────────────────────────────
+    "CRV", "LDO", "DYDX", "PENDLE", "EIGEN", "MORPHO", "API3",
+    "COMP", "CAKE", "RENDER", "FET", "TAO", "ONDO", "PYTH", "JUP",
+    "JTO", "WLD", "RSR", "BAND", "SKY",
+
+    # ── High-beta memes and new listings: widest funding swings ──────────────
+    "WIF", "BOME", "PENGU", "NEIRO", "HMSTR", "TRUMP", "ORDI",
+    "ARKM", "BLUR", "KAITO", "VIRTUAL", "GALA", "AXS", "SAND",
+    "CHZ", "YGG", "ALICE", "APE", "ENJ", "SFP", "BICO", "LPT",
 ]
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -107,18 +100,97 @@ def get_tier(symbol):
     return BUCKET_TIERS["fast"]
 SD_THRESHOLD       = 2.0
 
-EXCHANGE_FEE_PCT   = 0.05865
+# ── Fee tiers ─────────────────────────────────────────────────────────────────
+# (spot_maker, spot_taker, perp_maker, perp_taker) in percent, per execution.
+# ZERO is the presentation default: bid-ask spread is then the only cost.
+FEE_TIERS = {
+    "ZERO": (0.0000, 0.0000, 0.0000, 0.0000),
+    "VIP0": (0.1000, 0.1000, 0.0200, 0.0500),
+    "VIP1": (0.0900, 0.1000, 0.0160, 0.0400),
+    "VIP2": (0.0800, 0.1000, 0.0140, 0.0350),
+    "VIP3": (0.0420, 0.0600, 0.0120, 0.0320),
+    "VIP4": (0.0420, 0.0540, 0.0100, 0.0300),
+    "VIP5": (0.0360, 0.0480, 0.0080, 0.0270),
+    "VIP6": (0.0300, 0.0420, 0.0060, 0.0250),
+    "VIP7": (0.0240, 0.0360, 0.0040, 0.0220),
+    "VIP8": (0.0180, 0.0300, 0.0020, 0.0200),
+    "VIP9": (0.0120, 0.0240, 0.0000, 0.0170),
+}
+FEE_TIER = os.environ.get("FEE_TIER", "ZERO").strip().upper()
+if FEE_TIER not in FEE_TIERS:
+    FEE_TIER = "ZERO"
+
+# Which assumption the pre-trade gates price in. Fills are maker-first, so "maker"
+# is the matching expectation; "taker" gates conservatively on the worst case.
+FEE_GATE_MODE = os.environ.get("FEE_GATE_MODE", "maker").strip().lower()
+
+def set_fee_tier(tier):
+    """Swap the fee tier at runtime (dashboard/stage toggle). Returns the active tier."""
+    global FEE_TIER
+    t = str(tier).strip().upper()
+    if t in FEE_TIERS:
+        FEE_TIER = t
+    return FEE_TIER
+
+def leg_fee_pct(leg, fill_type):
+    """Fee in percent for one execution on one leg."""
+    sm, st, pm, pt = FEE_TIERS[FEE_TIER]
+    if leg == "spot":
+        return sm if fill_type == "maker" else st
+    return pm if fill_type == "maker" else pt
+
+def round_trip_fee_pct(fill_type=None):
+    """Entry + exit on both legs = 4 executions."""
+    ft = fill_type or ("maker" if FEE_GATE_MODE == "maker" else "taker")
+    return 2 * (leg_fee_pct("spot", ft) + leg_fee_pct("perp", ft))
+
+# Kept for display only — the live number comes from round_trip_fee_pct().
+EXCHANGE_FEE_PCT   = round_trip_fee_pct()
+
+# ── Maker-first execution ─────────────────────────────────────────────────────
+# Post passive at the touch; if unfilled after MAKER_WAIT_MS, cross and take.
+MAKER_FIRST        = os.environ.get("MAKER_FIRST", "1") == "1"
+MAKER_WAIT_MS      = float(os.environ.get("MAKER_WAIT_MS", 200.0))
+# If one leg fills maker and the other times out, take the laggard immediately
+# rather than sitting delta-exposed.
+LEG_RISK_POLICY    = os.environ.get("LEG_RISK_POLICY", "take").strip().lower()
+
 REVERSION_FRACTION = 0.90    # exit when this fraction of entry deviation has reverted
                                     # 0.90 = captures borderline trades just above friction
                                     # tune range: 0.85 (faster exit) ↔ 0.95 (max profit, slower)
 MIN_NET_PCT        = 0.001   # fallback exit for tiny entries: if 90% reversion still
                                     # can't cover friction, exit at this minimum net profit
-MAX_HOLD_SEC       = 180.0
+MAX_HOLD_SEC       = float(os.environ.get("MAX_HOLD_SEC", 180.0))
 POST_RECONNECT_COOLDOWN_SEC = 10.0  # block new entries for N seconds after any reconnect
 
-# Latency simulation: default 0.0s for immediate zero-sleep execution (override via env var if testing artificial latency)
-ENTRY_DELAY_SEC    = float(os.environ.get("ENTRY_DELAY_SEC", 0.0))
-EXIT_DELAY_SEC     = float(os.environ.get("EXIT_DELAY_SEC", 0.0))
+# ── Funding capture ───────────────────────────────────────────────────────────
+# STRATEGY: "spread" = original 2σ mean reversion only
+#           "funding" = delta-neutral funding capture only
+#           "both" = funding when a stamp is in range, spread otherwise
+STRATEGY                  = os.environ.get("STRATEGY", "funding").strip().lower()
+# Enter this far ahead of the funding stamp (funding pays to whoever holds AT the stamp)
+FUNDING_ENTRY_WINDOW_SEC  = float(os.environ.get("FUNDING_ENTRY_WINDOW_SEC", 3600.0))
+# Minimum |funding rate| worth entering for, in percent per interval
+MIN_FUNDING_PCT           = float(os.environ.get("MIN_FUNDING_PCT", 0.0050))
+# Require expected edge to beat friction by this multiple (kills penny trades)
+EDGE_FRICTION_MULT        = float(os.environ.get("EDGE_FRICTION_MULT", 1.5))
+# Minimum annualised return on capital for a funding trade to be worth the hold
+MIN_FUNDING_APR           = float(os.environ.get("MIN_FUNDING_APR", 20.0))
+# How long after the stamp we keep trying to exit on convergence before timing out
+FUNDING_EXIT_GRACE_SEC    = float(os.environ.get("FUNDING_EXIT_GRACE_SEC", 900.0))
+DEFAULT_FUNDING_INTERVAL_H = 8.0
+# Stop loss, expressed as a multiple of the funding we entered to collect, so it
+# scales with the trade: rates across these pairs span two orders of magnitude,
+# and a fixed percentage would be far too loose on one coin and too tight on another.
+STOP_LOSS_FUNDING_MULT    = float(os.environ.get("STOP_LOSS_FUNDING_MULT", 2.0))
+# Floor for the stop, for the case where funding is tiny
+STOP_LOSS_MIN_PCT         = float(os.environ.get("STOP_LOSS_MIN_PCT", 0.05))
+# Below this, an entry deviation is noise and "convergence" is not a meaningful exit
+MIN_CONVERGENCE_DEV_PCT   = float(os.environ.get("MIN_CONVERGENCE_DEV_PCT", 0.005))
+
+# Latency simulation: 1ms by default so a fill never lands on the signal tick itself
+ENTRY_DELAY_SEC    = float(os.environ.get("ENTRY_DELAY_SEC", 0.001))
+EXIT_DELAY_SEC     = float(os.environ.get("EXIT_DELAY_SEC", 0.001))
 
 # Stream mode: "bookTicker" (real-time tick-by-tick, 0ms buffer) or "depth20" (100ms snapshot)
 STREAM_TYPE        = os.environ.get("STREAM_TYPE", "bookTicker").strip()
@@ -188,6 +260,8 @@ def _exit_type(reason):
     if r.startswith("MIN PROFIT"): return "min-profit"
     if r.startswith("TIMEOUT"):    return "timeout"
     if r.startswith("WATCHDOG"):   return "watchdog"
+    if r.startswith("STOP LOSS"):  return "stop-loss"
+    if r.startswith("FUNDING"):    return "funding"
     return "other"
 
 def record_trade_event(ev):
@@ -291,6 +365,8 @@ def check_feeds(now, prev_msgs):
             continue
         if f["last_msg"] is None:
             continue
+        if not f.get("quotes", True):
+            continue          # funding feed carries no order book — nothing to freshen
         # every message up to last_msg has been handled, in order, so a coin whose quote came
         # in on this connection session and hasn't changed since is still current as of last_msg
         ts_key, tick_attr, since, fresh = f"{f['leg']}_ts", f"{f['leg']}_last_tick", f["opened_at"], f["last_msg"]
@@ -316,6 +392,118 @@ def feed_monitor():
             print(f"{Fore.RED}[feed-monitor] {type(e).__name__}: {e}{Style.RESET_ALL}")
 
 # ══════════════════════════════════════════════════════════════════════════════
+# FUNDING FEED — one connection carries the funding rate + next stamp for every
+# symbol on USDⓈ-M futures (!markPrice@arr). Funding pays to whoever holds the
+# position AT the stamp, so both the rate and its countdown drive entry timing.
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Funding comes over REST, not WebSocket. The documented !markPrice@arr stream
+# opens cleanly here but never delivers a frame — verified against a bookTicker
+# control on the same socket (2280 messages vs 0 in six seconds), including when
+# both are subscribed together. premiumIndex returns the rate and the next stamp
+# for every symbol in a single unauthenticated call, so one poll covers the book.
+FUNDING_REST_URL = "https://fapi.binance.com/fapi/v1/premiumIndex"
+FUNDING_INFO_URL = "https://fapi.binance.com/fapi/v1/fundingInfo"
+FUNDING_POLL_SEC = float(os.environ.get("FUNDING_POLL_SEC", 5.0))
+
+def fetch_funding_intervals(all_cs):
+    """Most pairs settle every 8h, but many volatile ones run 4h — which doubles
+    how often they pay. fundingInfo only lists symbols with non-default settings,
+    so default to 8h and override whatever it returns."""
+    by_symbol = {f"{cs.symbol.upper()}USDT": cs for cs in all_cs}
+    try:
+        rows = _rest_get(FUNDING_INFO_URL)
+    except Exception as e:
+        print(f"{Fore.YELLOW}⚠️  fundingInfo fetch failed ({e}) — assuming {DEFAULT_FUNDING_INTERVAL_H:.0f}h "
+              f"for every pair{Style.RESET_ALL}")
+        return
+    adjusted = []
+    for r in rows:
+        cs = by_symbol.get(r.get("symbol", ""))
+        if cs is None:
+            continue
+        try:
+            hours = float(r.get("fundingIntervalHours", DEFAULT_FUNDING_INTERVAL_H))
+        except (TypeError, ValueError):
+            continue
+        if hours and hours != DEFAULT_FUNDING_INTERVAL_H:
+            with cs.lock:
+                cs.funding_interval_h = hours
+            adjusted.append(f"{cs.symbol}({hours:.0f}h)")
+    if adjusted:
+        print(f"{Fore.CYAN}ℹ️  Non-8h funding intervals: {' '.join(adjusted)}{Style.RESET_ALL}")
+
+def run_funding_poller(all_cs):
+    """Poll premiumIndex for the funding rate and next stamp of every symbol.
+
+    One call covers the whole book, so this stays far inside the futures weight
+    budget even at a few seconds per poll. Registered in FEEDS so the dashboard
+    shows it alongside the book connections.
+    """
+    by_symbol = {f"{cs.symbol.upper()}USDT": cs for cs in all_cs}
+    name = "funding-rest"
+    feed = FEEDS.setdefault(name, {
+        "name": name, "leg": "funding", "cs": [], "coins": [], "quotes": False,
+        "status": "init", "opened_at": None, "last_msg": None, "msgs": 0, "rate": 0,
+        "connects": 0, "errors": 0, "last_error": None, "last_error_at": None,
+        "lag_ms": None, "lag_max_ms": None, "lag_sum": 0.0, "lag_n": 0, "lag_max": 0.0, "ws": None,
+    })
+
+    backoff = FUNDING_POLL_SEC
+    first   = True
+    while True:
+        try:
+            rows = _rest_get(FUNDING_REST_URL)
+            now  = time.time()
+            if feed["opened_at"] is None:
+                feed["opened_at"] = now
+                feed["connects"] += 1
+            feed["status"], feed["last_msg"] = "connected", now
+            feed["msgs"] += 1
+
+            matched = 0
+            for r in rows:
+                cs = by_symbol.get(r.get("symbol", ""))
+                if cs is None:
+                    continue
+                try:
+                    rate = float(r["lastFundingRate"])
+                    nxt  = int(r["nextFundingTime"])
+                    mark = float(r["markPrice"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                with cs.lock:
+                    cs.funding_rate    = rate
+                    cs.next_funding_ms = nxt
+                    cs.mark_price      = mark
+                    cs.funding_ts      = now
+                matched += 1
+
+            if first:
+                print(f"{Fore.GREEN}\u2705 funding-rest live \u2014 {matched}/{len(all_cs)} coins "
+                      f"(premiumIndex every {FUNDING_POLL_SEC:.0f}s){Style.RESET_ALL}")
+                first = False
+            backoff = FUNDING_POLL_SEC
+        except Exception as e:
+            feed["status"] = "retrying"
+            feed["errors"] += 1
+            feed["last_error"], feed["last_error_at"] = str(e)[:160], time.time()
+            print(f"{Fore.YELLOW}\u26a0\ufe0f  funding-rest poll failed: {e}{Style.RESET_ALL}")
+            backoff = min(backoff * 2, 30.0)
+        time.sleep(backoff)
+
+def funding_view(cs):
+    """(rate_pct_per_interval, seconds_to_stamp, interval_hours) or None if we
+    have no funding data for this coin yet."""
+    with cs.lock:
+        rate, nxt, ts, interval = cs.funding_rate, cs.next_funding_ms, cs.funding_ts, cs.funding_interval_h
+    if rate is None or nxt is None or ts is None:
+        return None
+    if time.time() - ts > 60:          # funding feed has gone quiet — don't trust it
+        return None
+    return rate * 100.0, (nxt / 1000.0 - time.time()), interval
+
+# ══════════════════════════════════════════════════════════════════════════════
 # PER-COIN STATE
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -332,6 +520,13 @@ class CoinState:
             "spot_bids": [], "spot_asks": [], "spot_ts": None,
             "perp_bids": [], "perp_asks": [], "perp_ts": None,
         }
+
+        # ── Funding state (fed by the !markPrice@arr stream) ─────────────────
+        self.funding_rate       = None   # decimal per interval: 0.0001 = 0.01%
+        self.next_funding_ms    = None   # ms epoch of the next funding stamp
+        self.funding_ts         = None   # when we last heard a funding update
+        self.funding_interval_h = DEFAULT_FUNDING_INTERVAL_H
+        self.mark_price         = None
 
         self.buckets       = deque(maxlen=self.rolling_win + 10)
         self.slip_history  = deque(maxlen=500)
@@ -524,6 +719,146 @@ def get_exit_vwap(snap, direction, notional):
     perp_fill, _, _ = vwap_fill(perp_levels, perp_qty)
     return spot_fill, perp_fill
 
+def _funding_notional(snap, direction):
+    """Size a funding trade to everything both legs can actually fill.
+    Funding pays on notional, so the spread doesn't have to be profitable on its
+    own — take all the liquidity that's there."""
+    if direction == +1:
+        spot_levels, perp_levels = snap["spot_asks"], snap["perp_bids"]
+    else:
+        spot_levels, perp_levels = snap["spot_bids"], snap["perp_asks"]
+    if not spot_levels or not perp_levels:
+        return 0.0
+    available = min(sum(p * q for p, q in spot_levels),
+                    sum(p * q for p, q in perp_levels))
+    return available if available >= MIN_NOTIONAL_USD else 0.0
+
+def max_hold_for(pos):
+    """Funding trades have to survive until their stamp, so the 180s spread
+    timeout can't apply to them — give them the countdown plus a grace window
+    to exit on convergence afterwards."""
+    if pos.get("trade_kind") != "funding":
+        return MAX_HOLD_SEC
+    return max(MAX_HOLD_SEC, (pos.get("secs_to_funding") or 0.0) + FUNDING_EXIT_GRACE_SEC)
+
+def accrue_funding(cs):
+    """Credit (or debit) funding whenever a stamp passes while we're holding.
+
+    We enter to *receive*, but the rate can flip before it settles — so sign it
+    off the live rate rather than assuming we always collect.
+      direction +1 (short perp) receives when the rate is positive
+      direction -1 (long perp)  receives when the rate is negative
+    """
+    fv = funding_view(cs)
+    with cs.lock:
+        pos = cs.open_position
+        if pos is None:
+            return
+        nxt = pos.get("next_funding_ms")
+        if nxt is None or time.time() * 1000.0 < nxt:
+            return
+        rate_pct = fv[0] if fv is not None else pos.get("funding_pct_at_entry", 0.0)
+        received = rate_pct if pos["direction"] == +1 else -rate_pct
+        pos["funding_collected_pct"] += received
+        pos["stamps_crossed"]        += 1
+        interval_h = cs.funding_interval_h or DEFAULT_FUNDING_INTERVAL_H
+        pos["next_funding_ms"] = nxt + interval_h * 3600 * 1000.0
+        sym, total = cs.symbol, pos["funding_collected_pct"]
+    clr = Fore.GREEN if received >= 0 else Fore.RED
+    print(f"\n{clr}  💰 [{sym}] FUNDING settled {received:+.6f}%  "
+          f"(cumulative {total:+.6f}%){Style.RESET_ALL}")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MAKER-FIRST EXECUTION
+# Post passive at the touch on both legs. Whatever hasn't filled when
+# MAKER_WAIT_MS elapses gets crossed and taken, so the pair never sits
+# half-on and delta-exposed.
+#
+# Fill rule (bookTicker gives quotes, not prints, so this is the observable
+# proxy): a resting buy at P is filled once the best ask trades down to <= P;
+# a resting sell at P is filled once the best bid trades up to >= P.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _taker_price(snap, leg, side, notional):
+    """VWAP price from crossing the spread and walking the book for `notional`."""
+    levels = snap[f"{leg}_asks"] if side == "buy" else snap[f"{leg}_bids"]
+    if not levels:
+        return None
+    ref = levels[0][0]
+    if ref <= 0:
+        return None
+    price, _, _ = vwap_fill(levels, notional / ref)
+    return price
+
+def _post_price(snap, leg, side):
+    """Where a passive order joins: buyers rest on the bid, sellers on the ask."""
+    return _best_bid(snap, leg) if side == "buy" else _best_ask(snap, leg)
+
+def _maker_filled(snap, leg, side, post_price):
+    if side == "buy":
+        opp = _best_ask(snap, leg)
+        return opp is not None and opp <= post_price
+    opp = _best_bid(snap, leg)
+    return opp is not None and opp >= post_price
+
+def execute_two_leg_fill(cs, direction, notional, phase, allow_cancel=True):
+    """Fill both legs maker-first, falling back to taker.
+
+    phase "entry": direction +1 → buy spot / sell perp.
+    phase "exit" : the reverse, to flatten.
+
+    Returns (spot_price, perp_price, spot_fill_type, perp_fill_type, waited_ms)
+    or None when the book is too thin to fill at all.
+    """
+    if phase == "entry":
+        spot_side = "buy" if direction == 1 else "sell"
+    else:
+        spot_side = "sell" if direction == 1 else "buy"
+    perp_side = "sell" if spot_side == "buy" else "buy"
+
+    t0   = time.time()
+    snap = get_fill_snap(cs)
+
+    spot_post = _post_price(snap, "spot", spot_side)
+    perp_post = _post_price(snap, "perp", perp_side)
+
+    spot_maker = perp_maker = False
+    if MAKER_FIRST and spot_post is not None and perp_post is not None and MAKER_WAIT_MS > 0:
+        deadline = t0 + MAKER_WAIT_MS / 1000.0
+        while True:
+            snap = get_fill_snap(cs)
+            if not spot_maker and _maker_filled(snap, "spot", spot_side, spot_post):
+                spot_maker = True
+            if not perp_maker and _maker_filled(snap, "perp", perp_side, perp_post):
+                perp_maker = True
+            if (spot_maker and perp_maker) or time.time() >= deadline:
+                break
+            time.sleep(0.002)
+
+        # One leg resting while the other is live = naked delta. Either cross the
+        # laggard straight away (default) or walk away from the whole trade.
+        # An exit can never be abandoned — flattening always crosses the laggard.
+        if allow_cancel and LEG_RISK_POLICY == "cancel" and (spot_maker != perp_maker):
+            return None
+
+    snap = get_fill_snap(cs)
+    spot_price = spot_post if spot_maker else _taker_price(snap, "spot", spot_side, notional)
+    perp_price = perp_post if perp_maker else _taker_price(snap, "perp", perp_side, notional)
+    if spot_price is None or perp_price is None:
+        return None
+
+    return (spot_price, perp_price,
+            "maker" if spot_maker else "taker",
+            "maker" if perp_maker else "taker",
+            (time.time() - t0) * 1000.0)
+
+def realised_fee_pct(pos, exit_spot_type, exit_perp_type):
+    """Actual fee cost of all four executions, given how each one filled."""
+    return (leg_fee_pct("spot", pos.get("entry_spot_fill_type", "taker")) +
+            leg_fee_pct("perp", pos.get("entry_perp_fill_type", "taker")) +
+            leg_fee_pct("spot", exit_spot_type) +
+            leg_fee_pct("perp", exit_perp_type))
+
 # ── retained helpers ──────────────────────────────────────────────────────────
 
 def get_fill_snap(cs):
@@ -535,7 +870,7 @@ def get_round_trip_pct(cs):
     pba = list(cs.perp_ba_hist)
     sm  = float(np.mean(sba)) if len(sba) >= 5 else 0.0
     pm  = float(np.mean(pba)) if len(pba) >= 5 else 0.0
-    return sm + pm + EXCHANGE_FEE_PCT
+    return sm + pm + round_trip_fee_pct()
 
 def get_rolling_stats(cs):
     if len(cs.buckets) < cs.rolling_win:
@@ -559,7 +894,8 @@ def update_slip_buffer(cs):
     with cs.lock:
         cs.stats["slip_buffer"] = max(buf, 0.0)
 
-def calc_pnl(pos, exit_spot, exit_perp, round_trip_pct):
+def calc_pnl(pos, exit_spot, exit_perp, round_trip_pct,
+             exit_spot_type="taker", exit_perp_type="taker"):
     d  = pos["direction"]
     es = pos["entry_spot_fill"]
     ep = pos["entry_perp_fill"]
@@ -570,8 +906,16 @@ def calc_pnl(pos, exit_spot, exit_perp, round_trip_pct):
         spot_leg = (es - exit_spot) / es * 100
         perp_leg = (exit_perp - ep) / ep * 100
     gross = spot_leg + perp_leg
-    net   = gross - round_trip_pct
-    usd   = net / 100 * pos["notional_usd"]
+
+    # round_trip_pct = rolling bid-ask estimate + a gate-time fee assumption.
+    # Strip that assumed fee back out and charge what the four fills actually
+    # cost, which depends on whether each one rested or crossed.
+    spread_component = round_trip_pct - round_trip_fee_pct()
+    fees_pct         = realised_fee_pct(pos, exit_spot_type, exit_perp_type)
+    funding_pct      = pos.get("funding_collected_pct", 0.0)
+
+    net = gross + funding_pct - spread_component - fees_pct
+    usd = net / 100 * pos["notional_usd"]
     return gross, net, usd
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -601,7 +945,7 @@ def print_entry(cs, pos, roll_mean, roll_std, upper, lower, min_dev,
     print(f"  Slippage       : book-walk={entry_slip_pct:.5f}%  "
           f"dev-shrink={dev_shrink_pct:.5f}%  total={total_slip:.5f}%")
     print(f"  Live friction  : {round_trip_pct:.5f}%  "
-          f"(spot_ba + perp_ba + {EXCHANGE_FEE_PCT}%)  "
+          f"(spot_ba + perp_ba + {round_trip_fee_pct():.5f}% [{FEE_TIER}])  "
           f"all-in cost={round_trip_pct + total_slip:.5f}%")
     print(f"{clr}{'─'*72}{Style.RESET_ALL}")
 
@@ -671,6 +1015,18 @@ MASTER_CSV_FIELDS = [
     "book_walk_slip_pct",       # L20 VWAP slippage vs mid, both legs combined
     "live_friction_pct",        # rolling bid-ask + exchange fee
     "total_entry_cost_pct",     # book_walk_slip + live_friction
+    # ── execution: how each of the four fills landed ─────────────────────────
+    "trade_kind",               # "spread" or "funding"
+    "entry_spot_fill_type", "entry_perp_fill_type",
+    "exit_spot_fill_type",  "exit_perp_fill_type",
+    "maker_legs",               # 0-4, how many of the four rested rather than crossed
+    "fee_tier", "realised_fee_pct",
+    # ── funding ──────────────────────────────────────────────────────────────
+    "funding_pct_at_entry",     # rate seen when we entered
+    "funding_collected_pct",    # what actually settled while we held
+    "stamps_crossed",
+    "convergence_edge_pct",     # basis edge priced at entry (negative = adverse)
+    "stop_loss_pct",            # level this trade would have been cut at
     # ── outcome ──────────────────────────────────────────────────────────────
     "hold_sec",
     "gross_pnl_pct", "net_pnl_pct", "net_pnl_usd",
@@ -693,25 +1049,42 @@ def write_trade_csv(row):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def execute_entry(cs, direction, signal_spread, signal_deviation,
-                  roll_mean, roll_std, upper, lower, min_dev, round_trip_pct):
+                  roll_mean, roll_std, upper, lower, min_dev, round_trip_pct,
+                  trade_kind="spread", funding_pct=0.0, secs_to_funding=None,
+                  convergence_edge=0.0):
     t0 = time.time()
     if ENTRY_DELAY_SEC > 0:
-        time.sleep(ENTRY_DELAY_SEC)
+        time.sleep(ENTRY_DELAY_SEC)   # never fill on the signal tick itself
     delay_ms = (time.time() - t0) * 1000
 
     snap = get_fill_snap(cs)
 
-    # ── L20 book walk: find optimal notional ─────────────────────────────────
-    notional, entry_spot, entry_perp, entry_slip_pct = find_optimal_notional(
+    # ── Book walk: size the trade ────────────────────────────────────────────
+    notional, ref_spot, ref_perp, entry_slip_pct = find_optimal_notional(
         snap, direction, roll_mean, round_trip_pct
     )
+    if trade_kind == "funding":
+        # Funding pays on notional whether or not the spread alone is profitable,
+        # so size off everything both legs can fill. find_optimal_notional stops
+        # at the largest spread-profitable size, which is usually far smaller and
+        # on many entries is zero — sizing off it would leave most of the
+        # funding on the table.
+        notional = max(notional, _funding_notional(snap, direction))
 
-    if notional <= 0 or entry_spot is None or entry_perp is None:
+    if notional <= 0:
         with cs.lock:
             cs.entry_pending = False
         return
 
-    # Recompute fill spread/deviation from the VWAP prices
+    # ── Maker-first fill, taker fallback ─────────────────────────────────────
+    fill = execute_two_leg_fill(cs, direction, notional, "entry")
+    if fill is None:
+        with cs.lock:
+            cs.entry_pending = False
+        return
+    entry_spot, entry_perp, spot_fill_type, perp_fill_type, maker_wait_ms = fill
+
+    # Recompute fill spread/deviation from the realised prices
     fill_spread    = (entry_perp - entry_spot) / entry_spot * 100
     fill_deviation = fill_spread - roll_mean
 
@@ -746,6 +1119,21 @@ def execute_entry(cs, direction, signal_spread, signal_deviation,
             "best_pnl"           : -999.0,
             "best_pnl_usd"       : -999.0,
             "profit_target_hit"  : False,
+            # ── execution ────────────────────────────────────────────────────
+            "entry_spot_fill_type": spot_fill_type,
+            "entry_perp_fill_type": perp_fill_type,
+            "entry_maker_wait_ms" : maker_wait_ms,
+            # ── funding ──────────────────────────────────────────────────────
+            "trade_kind"          : trade_kind,
+            "funding_pct_at_entry": funding_pct,
+            "convergence_edge_pct": convergence_edge,
+            "secs_to_funding"     : secs_to_funding,
+            "stop_loss_pct"       : max(STOP_LOSS_FUNDING_MULT * abs(funding_pct),
+                                        STOP_LOSS_MIN_PCT),
+            "funding_collected_pct": 0.0,
+            "stamps_crossed"      : 0,
+            "next_funding_ms"     : (None if secs_to_funding is None
+                                     else int((now + secs_to_funding) * 1000)),
         }
         cs.entry_pending = False
 
@@ -772,14 +1160,17 @@ def execute_exit(cs, pos, exit_reason):
 
     with cs.lock:
         round_trip_pct = cs.stats["live_round_trip"]
-    snap = get_fill_snap(cs)
-    exit_spot, exit_perp = get_exit_vwap(snap, pos["direction"], pos["notional_usd"])
-    if None in (exit_spot, exit_perp):
+
+    fill = execute_two_leg_fill(cs, pos["direction"], pos["notional_usd"],
+                                "exit", allow_cancel=False)
+    if fill is None:
         with cs.lock:
             cs.exit_pending = False
         return
+    exit_spot, exit_perp, exit_spot_type, exit_perp_type, exit_maker_wait_ms = fill
 
-    gross, net, usd = calc_pnl(pos, exit_spot, exit_perp, round_trip_pct)
+    gross, net, usd = calc_pnl(pos, exit_spot, exit_perp, round_trip_pct,
+                               exit_spot_type, exit_perp_type)
     now = time.time()
 
     with cs.lock:
@@ -821,6 +1212,14 @@ def execute_exit(cs, pos, exit_reason):
         "exit_perp_fill"      : exit_perp,
         "exit_type"           : _exit_type(exit_reason),
         "exit_reason"         : exit_reason,
+        "trade_kind"          : pos.get("trade_kind", "spread"),
+        "funding_collected_pct": round(pos.get("funding_collected_pct", 0.0), 6),
+        "stamps_crossed"      : pos.get("stamps_crossed", 0),
+        "maker_legs"          : sum(1 for t in (pos.get("entry_spot_fill_type"),
+                                                pos.get("entry_perp_fill_type"),
+                                                exit_spot_type, exit_perp_type)
+                                    if t == "maker"),
+        "fee_tier"            : FEE_TIER,
     })
 
     print()
@@ -852,6 +1251,24 @@ def execute_exit(cs, pos, exit_reason):
         "live_friction_pct"    : round(round_trip_pct, 8),
         "total_entry_cost_pct" : round(round_trip_pct + pos.get("entry_slip_pct", 0.0)
                                        + pos.get("dev_shrink_pct", 0.0), 8),
+        # ── execution ─────────────────────────────────────────────────────────
+        "trade_kind"           : pos.get("trade_kind", "spread"),
+        "entry_spot_fill_type" : pos.get("entry_spot_fill_type", "taker"),
+        "entry_perp_fill_type" : pos.get("entry_perp_fill_type", "taker"),
+        "exit_spot_fill_type"  : exit_spot_type,
+        "exit_perp_fill_type"  : exit_perp_type,
+        "maker_legs"           : sum(1 for t in (pos.get("entry_spot_fill_type"),
+                                                 pos.get("entry_perp_fill_type"),
+                                                 exit_spot_type, exit_perp_type)
+                                     if t == "maker"),
+        "fee_tier"             : FEE_TIER,
+        "realised_fee_pct"     : round(realised_fee_pct(pos, exit_spot_type, exit_perp_type), 8),
+        # ── funding ───────────────────────────────────────────────────────────
+        "funding_pct_at_entry" : round(pos.get("funding_pct_at_entry", 0.0), 8),
+        "funding_collected_pct": round(pos.get("funding_collected_pct", 0.0), 8),
+        "stamps_crossed"       : pos.get("stamps_crossed", 0),
+        "convergence_edge_pct" : round(pos.get("convergence_edge_pct", 0.0), 8),
+        "stop_loss_pct"        : round(pos.get("stop_loss_pct", 0.0), 8),
         # ── outcome ───────────────────────────────────────────────────────────
         "hold_sec"             : round(now - pos["entry_time"], 2),
         "gross_pnl_pct"        : round(gross, 8),
@@ -866,6 +1283,56 @@ def execute_exit(cs, pos, exit_reason):
 # TICK-LEVEL GATE CHECK — entry
 # ══════════════════════════════════════════════════════════════════════════════
 
+def funding_entry_check(cs, round_trip, deviation):
+    """Is there a funding stamp worth holding into?
+
+    One trade, two earners: the funding payment at the stamp, and the basis
+    converging back to its mean while we hold. They normally point the same way
+    — funding is positive exactly when the perp is rich, and the trade that
+    collects it is the one that profits as that richness decays.
+
+    `deviation` is the current spread minus its rolling mean. Reversion helps a
+    long-spot/short-perp book when the spread sits above its mean, and helps the
+    opposite book when it sits below, so signing it by direction turns it into an
+    edge that can be positive or negative. We still take the trade when it is
+    negative, as long as funding more than pays for it.
+
+    Returns (direction, funding_pct, secs_to_stamp, convergence_edge_pct) or None.
+    """
+    fv = funding_view(cs)
+    if fv is None:
+        return None
+    rate_pct, secs_to_stamp, interval_h = fv
+
+    if abs(rate_pct) < MIN_FUNDING_PCT:
+        return None
+    if secs_to_stamp <= 0 or secs_to_stamp > FUNDING_ENTRY_WINDOW_SEC:
+        return None
+
+    direction = +1 if rate_pct > 0 else -1
+
+    # Only part of a dislocation realistically reverts inside the hold.
+    convergence_edge = deviation * direction * REVERSION_FRACTION
+
+    total_expected = abs(rate_pct) + convergence_edge - round_trip
+    if total_expected <= 0:
+        return None
+    # A multiple of friction, not merely above it: an edge that only just clears
+    # costs sits inside the error of the cost estimate itself.
+    if (abs(rate_pct) + convergence_edge) < EDGE_FRICTION_MULT * round_trip:
+        return None
+
+    # Judged as a rate of return, not an absolute. Capital is committed until we
+    # exit, which is the stamp plus however long convergence takes afterwards —
+    # not just the countdown, or a trade entered seconds before a stamp would
+    # look near-infinitely attractive.
+    hold_hours = max((secs_to_stamp + FUNDING_EXIT_GRACE_SEC / 2.0) / 3600.0, 1.0 / 60.0)
+    apr        = total_expected * (8760.0 / hold_hours)
+    if apr < MIN_FUNDING_APR:
+        return None
+
+    return direction, rate_pct, secs_to_stamp, convergence_edge
+
 def check_entry_on_tick(cs, snap):
     with cs.lock:
         if cs.open_position is not None or cs.entry_pending:
@@ -877,13 +1344,46 @@ def check_entry_on_tick(cs, snap):
     if not ENTRIES_ENABLED.is_set():
         return
 
-    if not bs["ready"]:
+    if last_recon is not None and (time.time() - last_recon) < POST_RECONNECT_COOLDOWN_SEC:
         return
 
-    # Block new entries for POST_RECONNECT_COOLDOWN_SEC after any reconnect —
-    # avoids trading on the first few noisy/stale ticks right after a stream
-    # outage, before the book and rolling stats have stabilised again.
-    if last_recon is not None and (time.time() - last_recon) < POST_RECONNECT_COOLDOWN_SEC:
+    # ── Funding capture ──────────────────────────────────────────────────────
+    # Checked ahead of the spread gates and without waiting for the rolling
+    # window: the edge here is the funding payment, not the z-score.
+    if STRATEGY in ("funding", "both"):
+        spot_mid = _mid(snap, "spot")
+        perp_mid = _mid(snap, "perp")
+        if spot_mid is not None and perp_mid is not None:
+            spread_pct = (perp_mid - spot_mid) / spot_mid * 100
+            # No warm rolling window yet → no mean to revert to, so the trade is
+            # priced on funding alone rather than on an imagined convergence.
+            roll_mean  = bs["roll_mean"] if bs["ready"] else spread_pct
+            deviation  = spread_pct - roll_mean
+            fc = funding_entry_check(cs, round_trip, deviation)
+            if fc is not None:
+                direction, funding_pct, secs_to_stamp, convergence_edge = fc
+                with cs.lock:
+                    if cs.open_position is not None or cs.entry_pending:
+                        return
+                    cs.entry_pending = True
+                    cs.stats["signals_detected"] += 1
+                threading.Thread(
+                    target=execute_entry,
+                    args=(cs, direction, spread_pct, spread_pct - roll_mean,
+                          roll_mean, bs["roll_std"] or 0.0,
+                          bs["upper"] or 0.0, bs["lower"] or 0.0,
+                          bs["min_dev"] or 0.0, round_trip),
+                    kwargs={"trade_kind": "funding", "funding_pct": funding_pct,
+                            "secs_to_funding": secs_to_stamp,
+                            "convergence_edge": convergence_edge},
+                    daemon=True,
+                ).start()
+                return
+
+    if STRATEGY == "funding":
+        return      # funding-only: never fall through to a spread trade
+
+    if not bs["ready"]:
         return
 
     spot_mid   = _mid(snap, "spot")
@@ -965,6 +1465,61 @@ def check_exit_on_tick(cs, snap):
     abs_curr_dev   = abs(curr_deviation)
 
     print_hold(cs, pos, gross, net, usd, round_trip_pct, curr_deviation)
+
+    # ── Funding trades ───────────────────────────────────────────────────────
+    # The payment only lands if we're still holding at the stamp, so nothing
+    # closes before it. Once it has settled, leave as soon as the basis has
+    # converged far enough that funding + convergence is net positive.
+    if pos.get("trade_kind") == "funding":
+        collected  = pos.get("funding_collected_pct", 0.0)
+        stop_pct   = pos.get("stop_loss_pct", STOP_LOSS_MIN_PCT)
+        past_stamp = pos.get("stamps_crossed", 0) >= 1
+
+        # Stop loss runs before and after the stamp. If the basis has moved
+        # against us by more than the funding was ever going to pay, the reason
+        # for holding is gone — waiting for the stamp would only add to it.
+        if net <= -stop_pct:
+            with cs.lock:
+                if cs.open_position is None or cs.exit_pending:
+                    return
+                cs.exit_pending = True
+                pos_snap = cs.open_position
+            reason = (f"STOP LOSS  net={net:+.5f}% <= -{stop_pct:.5f}%  "
+                      f"funding={collected:+.5f}%  "
+                      f"dev:{pos['entry_deviation']:+.5f}%→{curr_deviation:+.5f}%")
+            threading.Thread(target=execute_exit, args=(cs, pos_snap, reason),
+                             daemon=True).start()
+            return
+
+        # Nothing else closes before the stamp — the payment is why we are here.
+        if not past_stamp:
+            return
+
+        # Funding is banked; now let the convergence leg pay out. Leaving the
+        # moment net turns positive would hand most of that back.
+        converged = False
+        if abs_entry_dev >= MIN_CONVERGENCE_DEV_PCT:
+            converged = abs_curr_dev <= abs_entry_dev * (1.0 - REVERSION_FRACTION)
+        else:
+            # Entry deviation was noise, so there is no convergence to wait for.
+            converged = net >= 0
+
+        if converged:
+            with cs.lock:
+                if cs.open_position is None or cs.exit_pending:
+                    return
+                cs.open_position["profit_target_hit"] = True
+                cs.exit_pending = True
+                pos_snap = cs.open_position
+            pct_reverted = ((abs_entry_dev - abs_curr_dev) / abs_entry_dev * 100
+                            if abs_entry_dev > 0 else 100.0)
+            reason = (f"FUNDING + CONVERGENCE  funding={collected:+.5f}%  "
+                      f"reverted={pct_reverted:.0f}%  "
+                      f"dev:{pos['entry_deviation']:+.5f}%→{curr_deviation:+.5f}%  "
+                      f"net={net:+.5f}%")
+            threading.Thread(target=execute_exit, args=(cs, pos_snap, reason),
+                             daemon=True).start()
+        return
 
     # Reversion target: exit when REVERSION_FRACTION of entry deviation is gone
     # e.g. entry_dev=0.15%, REVERSION_FRACTION=0.70 → exit when abs_curr_dev <= 0.045%
@@ -1312,7 +1867,7 @@ def process_bucket(cs):
         ep  = cs.exit_pending
     if pos is not None and not ep:
         hold_sec = now - pos["entry_time"]
-        if hold_sec >= MAX_HOLD_SEC:
+        if hold_sec >= max_hold_for(pos):
             with cs.lock:
                 if cs.open_position is not None and not cs.exit_pending:
                     cs.exit_pending = True
@@ -1512,7 +2067,13 @@ def position_watchdog(all_cs):
             if trigger_bkt:
                 run_bucket(cs)
 
-            # 2. Position timeout / watchdog recovery
+            # 2. Settle funding for any stamp that passed while we were holding
+            try:
+                accrue_funding(cs)
+            except Exception as e:
+                print(f"{Fore.RED}[watchdog] funding accrual {cs.symbol}: {e}{Style.RESET_ALL}")
+
+            # 3. Position timeout / watchdog recovery
             with cs.lock:
                 pos = cs.open_position
                 ep  = cs.exit_pending
@@ -1520,9 +2081,10 @@ def position_watchdog(all_cs):
                 continue
             hold_sec          = now - pos["entry_time"]
             profit_target_hit = pos.get("profit_target_hit", False)
+            hold_limit        = max_hold_for(pos)
 
             # Force exit if: past timeout OR profit target was hit but exit failed
-            if hold_sec < MAX_HOLD_SEC and not profit_target_hit:
+            if hold_sec < hold_limit and not profit_target_hit:
                 continue
 
             with cs.lock:
@@ -1531,15 +2093,15 @@ def position_watchdog(all_cs):
                 cs.exit_pending = True
                 pos_snap = cs.open_position
 
-            if profit_target_hit and hold_sec < MAX_HOLD_SEC:
+            if profit_target_hit and hold_sec < hold_limit:
                 reason = f"WATCHDOG PROFIT RECOVERY (target was hit, exit had failed)"
                 print(f"\n{Fore.GREEN}  ✅ [{cs.symbol}] WATCHDOG recovering missed "
                       f"profit exit — hold={hold_sec:.0f}s{Style.RESET_ALL}")
             else:
-                overshoot = hold_sec - MAX_HOLD_SEC
+                overshoot = hold_sec - hold_limit
                 reason = f"WATCHDOG TIMEOUT ({hold_sec:.0f}s, +{overshoot:.0f}s overshoot)"
                 print(f"\n{Fore.YELLOW}  ⚠️  [{cs.symbol}] WATCHDOG forcing exit — "
-                      f"held {hold_sec:.0f}s (max={MAX_HOLD_SEC:.0f}s){Style.RESET_ALL}")
+                      f"held {hold_sec:.0f}s (max={hold_limit:.0f}s){Style.RESET_ALL}")
 
             threading.Thread(
                 target=execute_exit,
@@ -1569,6 +2131,18 @@ def start_engine(console_stats=True, connect_ws=True):
     stream_desc = "real-time tick-by-tick (0ms delay)" if STREAM_TYPE == "bookTicker" else f"depth20@{DEPTH_STREAM_MS}ms"
     entry_desc  = "0ms (Zero-sleep immediate execution)" if ENTRY_DELAY_SEC == 0 else f"{ENTRY_DELAY_SEC*1000:.1f}ms"
     exit_desc   = "0ms (Zero-sleep immediate execution)" if EXIT_DELAY_SEC == 0 else f"{EXIT_DELAY_SEC*1000:.1f}ms"
+    strat_desc  = (f"{STRATEGY}  (window {FUNDING_ENTRY_WINDOW_SEC/60:.0f}min, "
+                   f"min rate {MIN_FUNDING_PCT:.4f}%, min APR {MIN_FUNDING_APR:.0f}%, "
+                   f"edge >= {EDGE_FRICTION_MULT:.1f}x friction)")
+    edge_desc   = (f"funding + convergence ({REVERSION_FRACTION*100:.0f}% of deviation), "
+                   f"adverse basis allowed when funding covers it")
+    stop_desc   = (f"{STOP_LOSS_FUNDING_MULT:.1f}x funding collected "
+                   f"(floor {STOP_LOSS_MIN_PCT:.3f}%)")
+    fee_maker   = 2 * (leg_fee_pct("spot", "maker") + leg_fee_pct("perp", "maker"))
+    fee_taker   = 2 * (leg_fee_pct("spot", "taker") + leg_fee_pct("perp", "taker"))
+    fee_desc    = f"{FEE_TIER}  round-trip maker={fee_maker:.5f}%  taker={fee_taker:.5f}%"
+    exec_desc   = (f"maker-first {MAKER_WAIT_MS:.0f}ms then taker (leg-risk: {LEG_RISK_POLICY})"
+                   if MAKER_FIRST else "taker only")
 
     print(f"""
 {Fore.CYAN}{'═'*76}
@@ -1579,7 +2153,11 @@ def start_engine(console_stats=True, connect_ws=True):
   Exit delay     : {exit_desc}
   Window         : {ROLLING_WIN} x {BUCKET_SIZE_SEC}s = {ROLLING_WIN*BUCKET_SIZE_SEC:.0f}s
   SD gate        : {SD_THRESHOLD}sigma
-  Exchange fee   : {EXCHANGE_FEE_PCT:.5f}%
+  Strategy       : {strat_desc}
+  Edge           : {edge_desc}
+  Stop loss      : {stop_desc}
+  Fee tier       : {fee_desc}
+  Execution      : {exec_desc}
   Exit mode      : DYNAMIC REVERSION ({REVERSION_FRACTION*100:.0f}% of deviation)
   Max hold       : {MAX_HOLD_SEC:.0f}s
   Bucketing      : Event-driven on-tick (0 sleeping threads)
@@ -1626,6 +2204,10 @@ def start_engine(console_stats=True, connect_ws=True):
         ).start()
     if connect_ws:
         threading.Thread(target=feed_monitor, name="feed-monitor", daemon=True).start()
+        if STRATEGY in ("funding", "both"):
+            fetch_funding_intervals(all_cs)
+            threading.Thread(target=run_funding_poller, args=(all_cs,),
+                             name="funding-rest", daemon=True).start()
 
     if connect_ws:
         print(f"{Fore.GREEN}▶ Streams launched — {len(all_cs)} coins across "

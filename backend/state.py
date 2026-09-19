@@ -50,6 +50,7 @@ def _coin_row(cs, now, feed_of):
         n_slips   = len(cs.slip_history)
         last_rec  = cs.last_reconnect_time
     n_buckets = len(cs.buckets)
+    fv = E.funding_view(cs)          # (rate_pct, secs_to_stamp, interval_h) or None
 
     spread, sm, pm = _spread_pct(latest)
     ready = bool(bs["ready"])
@@ -114,7 +115,18 @@ def _coin_row(cs, now, feed_of):
             "net_pct"       : _f(net),
             "net_usd"       : _f(usd, 4),
             "best_net_pct"  : _f(best) if best > -900 else None,
-            "max_hold_sec"  : E.MAX_HOLD_SEC,
+            "max_hold_sec"  : E.max_hold_for(pos),
+            "trade_kind"    : pos.get("trade_kind", "spread"),
+            "funding_entry_pct"    : _f(pos.get("funding_pct_at_entry", 0.0)),
+            "funding_collected_pct": _f(pos.get("funding_collected_pct", 0.0)),
+            "stamps_crossed"       : pos.get("stamps_crossed", 0),
+            "convergence_edge_pct" : _f(pos.get("convergence_edge_pct", 0.0)),
+            "stop_loss_pct"        : _f(pos.get("stop_loss_pct", 0.0)),
+            "secs_to_stamp"        : _f(max(0.0, (pos["next_funding_ms"] / 1000.0 - now)), 0)
+                                     if pos.get("next_funding_ms") else None,
+            "entry_maker_legs"     : sum(1 for t in (pos.get("entry_spot_fill_type"),
+                                                     pos.get("entry_perp_fill_type"))
+                                         if t == "maker"),
         }
 
     cooldown = 0.0
@@ -142,6 +154,10 @@ def _coin_row(cs, now, feed_of):
         "net_usd"       : _f(st["total_net_pnl_usd"], 4),
         "g3_buffer_pct" : _f(st["slip_buffer"]),
         "g3_samples"    : n_slips,
+        "funding_pct"   : _f(fv[0]) if fv else None,
+        "funding_apr"   : _f(fv[0] * (24.0 / fv[2]) * 365.0, 1) if fv else None,
+        "funding_in_sec": _f(max(0.0, fv[1]), 0) if fv else None,
+        "funding_ivl_h" : fv[2] if fv else None,
         "ws_spot"       : s_status,
         "ws_perp"       : p_status,
         "feed_spot"     : s_feed,
@@ -237,7 +253,23 @@ def build_state(prev_updates=None, prev_ts=None):
         "config": {
             "stream_type"        : E.STREAM_TYPE,
             "sd_threshold"       : E.SD_THRESHOLD,
-            "exchange_fee_pct"   : E.EXCHANGE_FEE_PCT,
+            "exchange_fee_pct"   : _f(E.round_trip_fee_pct(), 5),
+            # ── funding capture + convergence ────────────────────────────────
+            "strategy"           : E.STRATEGY,
+            "fee_tier"           : E.FEE_TIER,
+            "fee_tiers"          : sorted(E.FEE_TIERS),
+            "fee_rt_maker"       : _f(E.round_trip_fee_pct("maker"), 5),
+            "fee_rt_taker"       : _f(E.round_trip_fee_pct("taker"), 5),
+            "maker_first"        : E.MAKER_FIRST,
+            "maker_wait_ms"      : E.MAKER_WAIT_MS,
+            "leg_risk_policy"    : E.LEG_RISK_POLICY,
+            "min_funding_pct"    : E.MIN_FUNDING_PCT,
+            "min_funding_apr"    : E.MIN_FUNDING_APR,
+            "edge_friction_mult" : E.EDGE_FRICTION_MULT,
+            "funding_window_sec" : E.FUNDING_ENTRY_WINDOW_SEC,
+            "funding_grace_sec"  : E.FUNDING_EXIT_GRACE_SEC,
+            "stop_loss_mult"     : E.STOP_LOSS_FUNDING_MULT,
+            "stop_loss_min_pct"  : E.STOP_LOSS_MIN_PCT,
             "reversion_fraction" : E.REVERSION_FRACTION,
             "min_net_pct"        : E.MIN_NET_PCT,
             "max_hold_sec"       : E.MAX_HOLD_SEC,

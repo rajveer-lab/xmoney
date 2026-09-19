@@ -79,6 +79,7 @@
         <button class="tab" role="tab" id="tab-coins"  aria-controls="panel-coins"  aria-selected="true"  data-tab="coins">Coins<span id="n-coins" class="n"></span></button>
         <button class="tab" role="tab" id="tab-trades" aria-controls="panel-trades" aria-selected="false" data-tab="trades" tabindex="-1">Trades<span id="n-trades" class="n"></span></button>
         <button class="tab" role="tab" id="tab-feeds"  aria-controls="panel-feeds"  aria-selected="false" data-tab="feeds"  tabindex="-1">Feeds<span id="n-feeds" class="n"></span></button>
+        <button class="tab" role="tab" id="tab-strategy" aria-controls="panel-strategy" aria-selected="false" data-tab="strategy" tabindex="-1">Strategy</button>
         <button class="tab" role="tab" id="tab-config" aria-controls="panel-config" aria-selected="false" data-tab="config" tabindex="-1">Config</button>
       </div>
 
@@ -143,6 +144,28 @@
         <p class="cfg-note">Each feed carries up to 50 coins. A drop only pauses the coins on that feed; it reopens
           within seconds, and a feed that goes silent for 10s is reopened automatically. Quiet coins keep their last
           quote while their feed is live — bookTicker only sends a message when the top of book changes.</p>
+      </div>
+
+      <div id="panel-strategy" class="panel" role="tabpanel" aria-labelledby="tab-strategy" hidden>
+        <p class="strat-lede">We get paid twice for taking <strong>no view on the price</strong>. Click a step.</p>
+
+        <div class="strat-steps" id="strat-steps" role="tablist" aria-label="Strategy steps"></div>
+
+        <div class="strat-main">
+          <div class="strat-chart" id="strat-chart" aria-label="Worked example of one trade"></div>
+          <div class="strat-note" id="strat-note"></div>
+        </div>
+
+        <div class="strat-fees">
+          <div class="strat-fees-head">
+            <h3>Does it survive real fees?</h3>
+            <label for="fee-tier">Fee tier</label>
+            <select id="fee-tier" aria-label="Exchange fee tier"></select>
+            <span id="fee-live" class="fee-live"></span>
+          </div>
+          <p class="cfg-note">Switches live — every gate, fill and PnL uses the new tier on the next tick.
+            <strong>ZERO</strong> is spread-only. Higher tiers add real Binance maker/taker fees on all four executions.</p>
+        </div>
       </div>
 
       <div id="panel-config" class="panel" role="tabpanel" aria-labelledby="tab-config" hidden>

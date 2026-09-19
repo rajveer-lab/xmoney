@@ -102,6 +102,24 @@ def create_app(bc: Broadcaster) -> Flask:
         print(f"[control] new entries {'ENABLED' if body['enabled'] else 'PAUSED'}")
         return jsonify(entries_enabled=E.ENTRIES_ENABLED.is_set())
 
+    @app.post("/api/control/fee_tier")
+    def control_fee_tier():
+        """Swap the fee tier live — every gate, fill and PnL picks it up on the
+        next tick, so profitability can be shown at ZERO through VIP9 without a
+        restart."""
+        origin = request.headers.get("Origin")
+        if origin and urlparse(origin).netloc != request.host:
+            abort(403, "cross-origin request refused")
+        body = request.get_json(silent=True)
+        tier = (body or {}).get("tier")
+        if not isinstance(tier, str) or tier.strip().upper() not in E.FEE_TIERS:
+            abort(400, f'expected {{"tier": one of {sorted(E.FEE_TIERS)}}}')
+        active = E.set_fee_tier(tier)
+        print(f"[control] fee tier -> {active}")
+        return jsonify(fee_tier=active,
+                       round_trip_maker=E.round_trip_fee_pct("maker"),
+                       round_trip_taker=E.round_trip_fee_pct("taker"))
+
     @app.errorhandler(400)
     @app.errorhandler(403)
     @app.errorhandler(404)
