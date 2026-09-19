@@ -845,3 +845,37 @@ def test_trade_size_is_capped_whichever_sizer_wins(eng, monkeypatch):
     assert E._funding_notional(deep, +1) == pytest.approx(1000.0)
     size, _, _, _ = E.find_optimal_notional(deep, +1, 0.0, 0.0)
     assert size <= 1000.0
+
+
+def test_progress_is_measured_along_our_side_not_distance_from_zero(eng, monkeypatch):
+    """A short perp profits as the gap falls, a long perp as it rises. Measuring
+    |gap| shrinking called a gap running our way 'widened' and a gap closing
+    against us 'closed', so a profitable position read as losing."""
+    monkeypatch.setattr(E, "ALL_CS", [])
+    for direction, entry_gap, curr_gap, pays_us in (
+            (+1, -0.04, -0.06, True),    # short perp, gap falls further: pays
+            (+1, -0.04, -0.02, False),   # gap climbs toward zero: costs us
+            (-1, +0.04, +0.06, True),    # long perp, gap rises further: pays
+            (-1, +0.04, +0.02, False)):
+        cs = make_coin()
+        monkeypatch.setattr(E, "ALL_CS", [cs])
+        E.process_spot_tick(cs, book(100.0))
+        E.process_perp_tick(cs, book(100.0 * (1 + curr_gap / 100)))
+        cs.open_position = make_funding_pos(direction=direction, entry_deviation=entry_gap,
+                                            entry_mean=0.0, stamps_crossed=1)
+        row = build_state()[0]["coins"][0]["position"]
+        assert (row["reverted_pct"] > 0) is pays_us, (direction, entry_gap, curr_gap)
+
+
+def test_no_convergence_to_collect_when_the_gap_starts_on_the_wrong_side(eng, monkeypatch):
+    """Short perp with the gap already below spot: closing it costs us, so the
+    trade rests on the funding alone and the panel should say so."""
+    cs = make_coin()
+    monkeypatch.setattr(E, "ALL_CS", [cs])
+    E.process_spot_tick(cs, book(100.0))
+    E.process_perp_tick(cs, book(99.96))
+    cs.open_position = make_funding_pos(direction=+1, entry_deviation=-0.04, entry_mean=0.0)
+    assert build_state()[0]["coins"][0]["position"]["conv_available"] is False
+
+    cs.open_position = make_funding_pos(direction=+1, entry_deviation=+0.04, entry_mean=0.0)
+    assert build_state()[0]["coins"][0]["position"]["conv_available"] is True

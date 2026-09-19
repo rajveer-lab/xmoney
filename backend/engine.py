@@ -1567,14 +1567,24 @@ def check_exit_on_tick(cs, snap):
         if not past_stamp:
             return
 
-        # Funding is banked; now let the convergence leg pay out. Leaving the
-        # moment net turns positive would hand most of that back.
-        converged = False
-        if abs_entry_dev >= MIN_CONVERGENCE_DEV_PCT:
-            converged = abs_curr_dev <= abs_entry_dev * (1.0 - REVERSION_FRACTION)
-        else:
-            # Entry deviation was noise, so there is no convergence to wait for.
+        # Funding is banked; now let the convergence leg pay out.
+        #
+        # Which way counts depends on the side we are on, not on distance from
+        # zero. A short perp profits as the gap falls, a long perp as it rises.
+        # Measuring |gap| shrinking treated a gap running our way as though it
+        # were going wrong, and a gap closing against us as though we were
+        # winning, which is why a profitable position could read "gap widened".
+        entry_gap = pos["entry_deviation"]
+        moved_our_way = (entry_gap - curr_deviation) * pos["direction"]
+        # A gap only pays us as it closes when it starts on our side. Sitting the
+        # wrong way round, closing it costs us, so there is nothing to wait for.
+        conv_available = entry_gap * pos["direction"] > 0
+
+        if abs_entry_dev < MIN_CONVERGENCE_DEV_PCT or not conv_available:
+            # No convergence to collect: leave as soon as we are in the black.
             converged = net >= 0
+        else:
+            converged = moved_our_way >= abs_entry_dev * REVERSION_FRACTION
 
         if converged:
             with cs.lock:
@@ -1583,10 +1593,10 @@ def check_exit_on_tick(cs, snap):
                 cs.open_position["profit_target_hit"] = True
                 cs.exit_pending = True
                 pos_snap = cs.open_position
-            pct_reverted = ((abs_entry_dev - abs_curr_dev) / abs_entry_dev * 100
+            pct_reverted = (moved_our_way / abs_entry_dev * 100
                             if abs_entry_dev > 0 else 100.0)
             reason = (f"FUNDING + CONVERGENCE  funding={collected:+.5f}%  "
-                      f"reverted={pct_reverted:.0f}%  "
+                      f"moved our way {pct_reverted:.0f}%  "
                       f"dev:{pos['entry_deviation']:+.5f}%→{curr_deviation:+.5f}%  "
                       f"net={net:+.5f}%")
             threading.Thread(target=execute_exit, args=(cs, pos_snap, reason),
@@ -1612,6 +1622,8 @@ def check_exit_on_tick(cs, snap):
             # Signed by our side: a rate that flipped means we now pay, not collect.
             next_payment = next_rate_pct if pos["direction"] == +1 else -next_rate_pct
             # Convergence still on the table, signed the same way.
+            # What is still on the table, signed by our side. Negative means the
+            # gap would have to move against us to close, so there is nothing here.
             conv_left    = curr_deviation * pos["direction"] * REVERSION_FRACTION
             forward_edge = next_payment + conv_left
             hold_h       = max((secs_next or 0.0) / 3600.0, 1.0 / 60.0)

@@ -222,7 +222,7 @@
     setText($("#k-notional"), "$" + Math.round(g.notional || 0).toLocaleString("en-US"));
     setText($("#k-open"), fmtInt(g.open_count));
     setText($("#k-deployed"), g.open_count ? fmtUsd(g.deployed_usd, false) + " deployed" : "Flat");
-    setText($("#k-ready"), g.coins_ready + "/" + g.coins_total);
+    setText($("#k-ready"), (g.coins_funded ?? g.coins_ready) + "/" + g.coins_total);
     const sc = g.state_counts || {};
     setText($("#k-ready-sub"), (sc.warming || 0) + (sc.connecting || 0) + " warming · " +
       ((sc.stale || 0) + (sc.offline || 0) + (sc.unlisted || 0)) + " no feed");
@@ -263,8 +263,8 @@
       const meter = el("div", "meter");
       meter.setAttribute("role", "img");
       meter.setAttribute("aria-label", widening
-        ? "Gap widened " + fmtNum(-rev, 0) + " percent beyond where we entered"
-        : "Gap closed " + fmtNum(rev, 0) + " percent of the " + target.toFixed(0) + " percent target");
+        ? "Gap has moved " + fmtNum(-rev, 0) + " percent against this position"
+        : "Gap has moved " + fmtNum(rev, 0) + " percent our way, of the " + target.toFixed(0) + " percent target");
       const fill = el("i", widening ? "bad" : "");
       fill.style.width = Math.min(100, Math.abs(rev)) + "%";
       const mark = el("b");
@@ -279,9 +279,13 @@
       // is not.
       const meta = el("div", "pos-meta num");
       const bit = (txt, cls) => meta.appendChild(el("span", cls || "", txt));
-      bit(widening ? "Gap widened " + fmtNum(-rev, 0) + "%"
-                   : "Gap closed " + fmtNum(rev, 0) + "% of " + target.toFixed(0) + "%",
-          widening ? "neg" : "");
+      bit(widening
+            ? "Moved against us " + fmtNum(-rev, 0) + "%"
+            : "Moved our way " + fmtNum(rev, 0) + "% of " + target.toFixed(0) + "%",
+          widening ? "neg" : "pos");
+      // When the gap starts on the wrong side, closing it costs us, so there is
+      // no second payday here and the trade rests on the funding alone.
+      if (p.conv_available === false) bit(" · funding only, no gap to collect", "dim");
       bit(" · net ");
       bit(fmtPct(p.net_pct), signCls(p.net_pct));
       const stamps = p.stamps_crossed || 0;

@@ -104,10 +104,15 @@ def _coin_row(cs, now, feed_of):
         curr_dev = None
         if spread is not None:
             curr_dev = spread - pos["entry_mean"]
-        abs_entry = abs(pos["entry_deviation"])
+        entry_gap = pos["entry_deviation"]
+        abs_entry = abs(entry_gap)
+        # Progress is measured along the side we are on, not by distance from
+        # zero: a short perp profits as the gap falls, a long perp as it rises.
         reverted = None
         if curr_dev is not None and abs_entry > 0:
-            reverted = (abs_entry - abs(curr_dev)) / abs_entry * 100
+            reverted = (entry_gap - curr_dev) * pos["direction"] / abs_entry * 100
+        # A gap only pays us as it closes when it started on our side.
+        conv_available = entry_gap * pos["direction"] > 0
         best = pos.get("best_pnl", -999.0)
         position = {
             "direction"     : pos["direction"],
@@ -118,6 +123,7 @@ def _coin_row(cs, now, feed_of):
             "entry_dev_pct" : _f(pos["entry_deviation"]),
             "curr_dev_pct"  : _f(curr_dev),
             "reverted_pct"  : _f(reverted, 1),
+            "conv_available": conv_available,
             "gross_pct"     : _f(gross),
             "net_pct"       : _f(net),
             "net_usd"       : _f(usd, 4),
@@ -249,6 +255,7 @@ def build_state(prev_updates=None, prev_ts=None):
             "unrealized_usd": _f(unreal, 4),
             "coins_total"   : len(coins),
             "coins_ready"   : counts.get("flat", 0) + counts.get("open", 0),
+            "coins_funded"  : sum(1 for c in coins if c["funding_pct"] is not None),
             "state_counts"  : counts,
             "ws_spot_up"    : sum(1 for c in coins if c["ws_spot"] == "connected"),
             "ws_perp_up"    : sum(1 for c in coins if c["ws_perp"] == "connected"),
