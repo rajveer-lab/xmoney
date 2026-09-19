@@ -382,7 +382,12 @@ def test_realised_fee_uses_how_each_leg_actually_filled(eng, monkeypatch):
 
 
 
-def set_funding(cs, rate_pct, secs_to_stamp, interval_h=8.0):
+def set_funding(cs, rate_pct, secs_to_stamp, interval_h=8.0, calm=True):
+    """Set a funding rate. `calm` also seeds a low-volatility basis history,
+    because the entry gate refuses coins whose gap it cannot measure."""
+    if calm and len(cs.buckets) < E.MIN_VOL_SAMPLES:
+        for i in range(E.MIN_VOL_SAMPLES + 10):
+            cs.buckets.append({"spread_pct": 0.002 if i % 2 else -0.002})
     with cs.lock:
         cs.funding_rate       = rate_pct / 100.0
         cs.next_funding_ms    = int((time.time() + secs_to_stamp) * 1000)
@@ -762,3 +767,18 @@ def test_volatility_does_not_wait_for_the_full_window(eng, monkeypatch):
     assert E.basis_volatility(cs) is None        # not enough to judge yet
     cs.buckets.append({"spread_pct": 0.1})
     assert E.basis_volatility(cs) is not None    # usable well before 1000 buckets
+
+
+def test_unmeasured_volatility_blocks_entry(eng, monkeypatch):
+    """Same principle as unknown costs: no measurement is not a green light."""
+    monkeypatch.setattr(E, "MIN_FUNDING_PCT", 0.001)
+    monkeypatch.setattr(E, "EDGE_FRICTION_MULT", 1.0)
+    monkeypatch.setattr(E, "MIN_FUNDING_APR", 0.0)
+    monkeypatch.setattr(E, "MIN_VOL_SAMPLES", 30)
+    cs = make_coin()
+    set_funding(cs, 0.20, 600, calm=False)
+    assert E.basis_volatility(cs) is None
+    assert E.funding_entry_check(cs, 0.001, 0.0) is None      # no history, no trade
+    for i in range(40):
+        cs.buckets.append({"spread_pct": 0.01 if i % 2 else -0.01})
+    assert E.funding_entry_check(cs, 0.001, 0.0) is not None  # calm gap, fine

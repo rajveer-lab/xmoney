@@ -1337,10 +1337,14 @@ def funding_entry_check(cs, round_trip, deviation):
     # deviation of how far this gap normally travels, being stopped is the
     # base case, not the exception, and the funding was never collectable.
     vol = basis_volatility(cs)
-    if vol is not None and vol > 0:
-        stop_pct = max(STOP_LOSS_FUNDING_MULT * abs(rate_pct), STOP_LOSS_MIN_PCT)
-        if (stop_pct / vol) < MIN_STOP_SIGMAS:
-            return None
+    if vol is None or vol <= 0:
+        # Not enough history to know how far this gap travels. Unmeasured is not
+        # the same as safe, and this is the filter that keeps us out of coins
+        # whose ordinary movement dwarfs their funding, so wait rather than guess.
+        return None
+    stop_pct = max(STOP_LOSS_FUNDING_MULT * abs(rate_pct), STOP_LOSS_MIN_PCT)
+    if (stop_pct / vol) < MIN_STOP_SIGMAS:
+        return None
 
     # Only part of a dislocation realistically reverts inside the hold.
     convergence_edge = deviation * direction * REVERSION_FRACTION
