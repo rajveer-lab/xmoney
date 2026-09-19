@@ -147,19 +147,19 @@ def round_trip_fee_pct(fill_type=None):
 # Kept for display only, the live number comes from round_trip_fee_pct().
 EXCHANGE_FEE_PCT   = round_trip_fee_pct()
 
-# ── Maker-first execution ─────────────────────────────────────────────────────
-# Post passive at the touch; if unfilled after MAKER_WAIT_MS, cross and take.
-MAKER_FIRST        = os.environ.get("MAKER_FIRST", "1") == "1"
-MAKER_WAIT_MS      = float(os.environ.get("MAKER_WAIT_MS", 200.0))
-# Entering is optional, so it is worth resting for a better price: if we never
-# fill we simply do not trade. Exiting is not optional. We are already exposed,
-# and a stop that waits 200ms for a passive fill lets the market run while it
-# waits. One LSK stop sized at 0.22% filled at -3.16% that way, because the perp
-# bid fell 3.4% during the wait. Exits cross immediately.
-MAKER_ON_EXIT      = os.environ.get("MAKER_ON_EXIT", "0") == "1"
-# If one leg fills maker and the other times out, take the laggard immediately
-# rather than sitting delta-exposed.
-LEG_RISK_POLICY    = os.environ.get("LEG_RISK_POLICY", "take").strip().lower()
+# ── Execution ─────────────────────────────────────────────────────────────────
+# Both legs fill immediately after ENTRY_DELAY_SEC / EXIT_DELAY_SEC at whatever
+# the book shows, and the fee charged is this, chosen rather than simulated.
+#
+# The engine used to race for a passive fill: post at the touch, wait, take if
+# nobody came. That wait is what turned an LSK stop sized at 0.22% into a 3.16%
+# loss, because the perp bid fell 3.4% while we sat there hoping to save a fee.
+# Assuming the fee is both simpler and safer, at the cost of being optimistic:
+# a real resting order is not guaranteed to fill. Set FILL_FEE_TYPE=taker for
+# the conservative view. Every trade records which was used.
+FILL_FEE_TYPE      = os.environ.get("FILL_FEE_TYPE", "maker").strip().lower()
+if FILL_FEE_TYPE not in ("maker", "taker"):
+    FILL_FEE_TYPE = "maker"
 
 REVERSION_FRACTION = 0.90    # exit when this fraction of entry deviation has reverted
                                     # 0.90 = captures borderline trades just above friction
@@ -790,14 +790,9 @@ def accrue_funding(cs):
           f"(cumulative {total:+.6f}%){Style.RESET_ALL}")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MAKER-FIRST EXECUTION
-# Post passive at the touch on both legs. Whatever hasn't filled when
-# MAKER_WAIT_MS elapses gets crossed and taken, so the pair never sits
-# half-on and delta-exposed.
-#
-# Fill rule (bookTicker gives quotes, not prints, so this is the observable
-# proxy): a resting buy at P is filled once the best ask trades down to <= P;
-# a resting sell at P is filled once the best bid trades up to >= P.
+# EXECUTION
+# Both legs cross the book together after the configured latency. The fee is an
+# assumption (FILL_FEE_TYPE), not a race that has to be won.
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _taker_price(snap, leg, side, notional):
@@ -811,24 +806,18 @@ def _taker_price(snap, leg, side, notional):
     price, _, _ = vwap_fill(levels, notional / ref)
     return price
 
-def _post_price(snap, leg, side):
-    """Where a passive order joins: buyers rest on the bid, sellers on the ask."""
-    return _best_bid(snap, leg) if side == "buy" else _best_ask(snap, leg)
-
-def _maker_filled(snap, leg, side, post_price):
-    if side == "buy":
-        opp = _best_ask(snap, leg)
-        return opp is not None and opp <= post_price
-    opp = _best_bid(snap, leg)
-    return opp is not None and opp >= post_price
-
 def execute_two_leg_fill(cs, direction, notional, phase, allow_cancel=True):
-    """Fill both legs maker-first, falling back to taker.
+    """Fill both legs at once, at the book we can see right now.
 
     phase "entry": direction +1 → buy spot / sell perp.
     phase "exit" : the reverse, to flatten.
 
-    Returns (spot_price, perp_price, spot_fill_type, perp_fill_type, waited_ms)
+    The caller has already waited ENTRY_DELAY_SEC / EXIT_DELAY_SEC, so this never
+    fills on the tick that triggered the signal. Both legs land together, which
+    is also what keeps the pair delta neutral: there is no window where one side
+    is on and the other is not.
+
+    Returns (spot_price, perp_price, spot_fee_type, perp_fee_type, elapsed_ms)
     or None when the book is too thin to fill at all.
     """
     if phase == "entry":
@@ -840,39 +829,12 @@ def execute_two_leg_fill(cs, direction, notional, phase, allow_cancel=True):
     t0   = time.time()
     snap = get_fill_snap(cs)
 
-    spot_post = _post_price(snap, "spot", spot_side)
-    perp_post = _post_price(snap, "perp", perp_side)
-
-    rest_first = MAKER_FIRST and (phase == "entry" or MAKER_ON_EXIT)
-
-    spot_maker = perp_maker = False
-    if rest_first and spot_post is not None and perp_post is not None and MAKER_WAIT_MS > 0:
-        deadline = t0 + MAKER_WAIT_MS / 1000.0
-        while True:
-            snap = get_fill_snap(cs)
-            if not spot_maker and _maker_filled(snap, "spot", spot_side, spot_post):
-                spot_maker = True
-            if not perp_maker and _maker_filled(snap, "perp", perp_side, perp_post):
-                perp_maker = True
-            if (spot_maker and perp_maker) or time.time() >= deadline:
-                break
-            time.sleep(0.002)
-
-        # One leg resting while the other is live = naked delta. Either cross the
-        # laggard straight away (default) or walk away from the whole trade.
-        # An exit can never be abandoned, flattening always crosses the laggard.
-        if allow_cancel and LEG_RISK_POLICY == "cancel" and (spot_maker != perp_maker):
-            return None
-
-    snap = get_fill_snap(cs)
-    spot_price = spot_post if spot_maker else _taker_price(snap, "spot", spot_side, notional)
-    perp_price = perp_post if perp_maker else _taker_price(snap, "perp", perp_side, notional)
+    spot_price = _taker_price(snap, "spot", spot_side, notional)
+    perp_price = _taker_price(snap, "perp", perp_side, notional)
     if spot_price is None or perp_price is None:
         return None
 
-    return (spot_price, perp_price,
-            "maker" if spot_maker else "taker",
-            "maker" if perp_maker else "taker",
+    return (spot_price, perp_price, FILL_FEE_TYPE, FILL_FEE_TYPE,
             (time.time() - t0) * 1000.0)
 
 def realised_fee_pct(pos, exit_spot_type, exit_perp_type):
@@ -2240,8 +2202,8 @@ def start_engine(console_stats=True, connect_ws=True):
     fee_maker   = 2 * (leg_fee_pct("spot", "maker") + leg_fee_pct("perp", "maker"))
     fee_taker   = 2 * (leg_fee_pct("spot", "taker") + leg_fee_pct("perp", "taker"))
     fee_desc    = f"{FEE_TIER}  round-trip maker={fee_maker:.5f}%  taker={fee_taker:.5f}%"
-    exec_desc   = (f"maker-first {MAKER_WAIT_MS:.0f}ms then taker (leg-risk: {LEG_RISK_POLICY})"
-                   if MAKER_FIRST else "taker only")
+    exec_desc   = (f"both legs at market after {ENTRY_DELAY_SEC*1000:.0f}ms, "
+                   f"charged at {FILL_FEE_TYPE} fees")
 
     print(f"""
 {Fore.CYAN}{'═'*76}

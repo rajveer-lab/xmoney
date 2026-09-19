@@ -65,7 +65,6 @@ def eng(tmp_path, monkeypatch):
     # Fill synchronously: maker-first parks an entry for MAKER_WAIT_MS in a
     # background thread, which races every "did a position open?" assertion.
     # Maker-first has its own tests below.
-    monkeypatch.setattr(E, "MAKER_FIRST", False)
     monkeypatch.setattr(E, "STRATEGY", "spread")
     for k in list(E.global_stats):
         monkeypatch.setitem(E.global_stats, k, 0.0 if isinstance(E.global_stats[k], float) else 0)
@@ -380,60 +379,8 @@ def test_realised_fee_uses_how_each_leg_actually_filled(eng, monkeypatch):
 
 # ── maker-first execution ────────────────────────────────────────────────────
 
-def test_maker_first_rests_at_the_touch_when_the_book_comes_to_us(eng, monkeypatch):
-    """A resting buy at the bid fills once the ask trades down onto it."""
-    monkeypatch.setattr(E, "MAKER_FIRST", True)
-    monkeypatch.setattr(E, "MAKER_WAIT_MS", 400.0)
-    cs = make_coin()
-    E.process_spot_tick(cs, book(100.0))
-    E.process_perp_tick(cs, book(100.0))
-    post_bid = E._best_bid(E.get_fill_snap(cs), "spot")
-
-    import threading
-    def collapse():                       # both sides converge onto our resting prices
-        time.sleep(0.05)
-        E.process_spot_tick(cs, {"b": f"{post_bid:.8f}", "B": "50", "a": f"{post_bid:.8f}", "A": "50"})
-        perp_ask = E._best_ask(E.get_fill_snap(cs), "perp")
-        E.process_perp_tick(cs, {"b": f"{perp_ask:.8f}", "B": "50", "a": f"{perp_ask:.8f}", "A": "50"})
-    threading.Thread(target=collapse, daemon=True).start()
-
-    spot_px, perp_px, spot_type, perp_type, waited = E.execute_two_leg_fill(cs, +1, 100.0, "entry")
-    assert spot_type == "maker" and spot_px == pytest.approx(post_bid)
-    assert perp_type == "maker"
-    assert waited < 400.0                 # returned as soon as both filled, not on timeout
 
 
-def test_maker_first_falls_back_to_taker_when_the_book_never_comes(eng, monkeypatch):
-    monkeypatch.setattr(E, "MAKER_FIRST", True)
-    monkeypatch.setattr(E, "MAKER_WAIT_MS", 30.0)
-    cs = make_coin()
-    E.process_spot_tick(cs, book(100.0))
-    E.process_perp_tick(cs, book(100.0))
-
-    spot_px, perp_px, spot_type, perp_type, waited = E.execute_two_leg_fill(cs, +1, 100.0, "entry")
-    assert spot_type == "taker" and perp_type == "taker"
-    assert waited >= 30.0
-    snap = E.get_fill_snap(cs)
-    assert spot_px == pytest.approx(E._best_ask(snap, "spot"))   # crossed to buy
-    assert perp_px == pytest.approx(E._best_bid(snap, "perp"))   # crossed to sell
-
-
-def test_leg_risk_cancel_abandons_a_half_filled_entry_but_never_an_exit(eng, monkeypatch):
-    monkeypatch.setattr(E, "MAKER_FIRST", True)
-    monkeypatch.setattr(E, "MAKER_WAIT_MS", 40.0)
-    monkeypatch.setattr(E, "LEG_RISK_POLICY", "cancel")
-    cs = make_coin()
-    E.process_spot_tick(cs, book(100.0))
-    E.process_perp_tick(cs, book(100.0))
-    # Only the spot leg gets filled → entry is abandoned rather than left naked.
-    monkeypatch.setattr(E, "_maker_filled",
-                        lambda snap, leg, side, price: leg == "spot")
-    assert E.execute_two_leg_fill(cs, +1, 100.0, "entry") is None
-    # An exit has to flatten regardless, so it crosses the laggard instead.
-    assert E.execute_two_leg_fill(cs, +1, 100.0, "exit", allow_cancel=False) is not None
-
-
-# ── funding capture ──────────────────────────────────────────────────────────
 
 def set_funding(cs, rate_pct, secs_to_stamp, interval_h=8.0):
     with cs.lock:
@@ -525,7 +472,6 @@ def test_funding_is_carried_into_pnl(eng, monkeypatch):
 
 def test_funding_position_holds_through_the_stamp_then_exits(eng, monkeypatch):
     """Nothing closes before the stamp, the payment is the whole trade."""
-    monkeypatch.setattr(E, "MAKER_FIRST", False)
     cs = make_coin()
     E.process_spot_tick(cs, book(100.0))
     E.process_perp_tick(cs, book(100.0))
@@ -586,7 +532,6 @@ def test_adverse_convergence_is_taken_when_funding_still_pays_for_it(eng, monkey
 
 
 def test_funding_exit_waits_for_convergence_instead_of_first_profit(eng, monkeypatch):
-    monkeypatch.setattr(E, "MAKER_FIRST", False)
     monkeypatch.setattr(E, "REVERSION_FRACTION", 0.9)
     cs = make_coin()
     E.process_spot_tick(cs, book(100.0))
@@ -614,7 +559,6 @@ def test_funding_exit_waits_for_convergence_instead_of_first_profit(eng, monkeyp
 def test_funding_stop_loss_fires_before_the_stamp(eng, monkeypatch):
     """A basis that blows through the funding we were going to collect ends the
     trade, waiting for the stamp would only add to the loss."""
-    monkeypatch.setattr(E, "MAKER_FIRST", False)
     cs = make_coin()
     E.process_spot_tick(cs, book(100.0))
     E.process_perp_tick(cs, book(101.0))          # basis moved hard against a dir +1 book
@@ -684,7 +628,6 @@ def test_stop_measures_from_entry_not_from_zero(eng, monkeypatch):
     unwinding, not a loss. Measuring the stop against raw net fired the instant a
     position opened on any coin whose spread was wider than the stop, which is how
     the engine took the same losing trade hundreds of times in a row."""
-    monkeypatch.setattr(E, "MAKER_FIRST", False)
     cs = make_coin()
     E.process_spot_tick(cs, book(100.0))
     E.process_perp_tick(cs, book(100.0))
@@ -724,7 +667,6 @@ def test_holding_past_a_stamp_is_decided_on_value_not_a_clock(eng, monkeypatch):
     """Once a payment is banked and the gap has not closed, staying should depend
     on whether the money still to be made beats the hurdle over the time it takes,
     not on a fixed grace window expiring."""
-    monkeypatch.setattr(E, "MAKER_FIRST", False)
     monkeypatch.setattr(E, "MIN_FUNDING_APR", 20.0)
     monkeypatch.setattr(E, "REVERSION_FRACTION", 0.9)
     cs = make_coin()
@@ -759,22 +701,24 @@ def test_funding_hold_ceiling_is_a_safety_net_not_the_strategy(eng):
     assert E.max_hold_for({"trade_kind": "spread"}) == E.MAX_HOLD_SEC
 
 
-def test_exits_cross_immediately_instead_of_resting(eng, monkeypatch):
-    """Entering is optional, so resting for a better price is free. Exiting is
-    not: waiting 200ms for a passive fill let one LSK stop sized at 0.22% fill
-    at -3.16%, because the perp bid fell 3.4% during the wait."""
-    monkeypatch.setattr(E, "MAKER_FIRST", True)
-    monkeypatch.setattr(E, "MAKER_WAIT_MS", 300.0)
-    monkeypatch.setattr(E, "MAKER_ON_EXIT", False)
+
+
+def test_both_legs_fill_together_at_the_book(eng, monkeypatch):
+    """No race to win: both legs cross at once, so the pair is never half on,
+    and the fee is whatever we said it is rather than whatever we managed."""
+    monkeypatch.setattr(E, "FILL_FEE_TYPE", "maker")
     cs = make_coin()
     E.process_spot_tick(cs, book(100.0))
     E.process_perp_tick(cs, book(100.0))
+    snap = E.get_fill_snap(cs)
 
     t0 = time.time()
-    _, _, st, pt, waited = E.execute_two_leg_fill(cs, +1, 100.0, "exit", allow_cancel=False)
-    assert (st, pt) == ("taker", "taker")
-    assert waited < 50 and (time.time() - t0) < 0.1      # did not sit out the window
+    sp, pp, sf, pf, waited = E.execute_two_leg_fill(cs, +1, 100.0, "entry")
+    assert (sf, pf) == ("maker", "maker")          # charged as configured
+    assert waited < 20 and (time.time() - t0) < 0.05   # no waiting around
+    assert sp == pytest.approx(E._best_ask(snap, "spot"))   # bought, so crossed up
+    assert pp == pytest.approx(E._best_bid(snap, "perp"))   # sold, so crossed down
 
-    # Entries still rest first, where the wait costs us nothing.
-    _, _, st, pt, waited = E.execute_two_leg_fill(cs, +1, 100.0, "entry")
-    assert waited >= 300.0
+    monkeypatch.setattr(E, "FILL_FEE_TYPE", "taker")
+    _, _, sf, pf, _ = E.execute_two_leg_fill(cs, +1, 100.0, "exit", allow_cancel=False)
+    assert (sf, pf) == ("taker", "taker")
