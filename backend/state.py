@@ -278,6 +278,7 @@ def build_state(prev_updates=None, prev_ts=None):
             "funding_grace_sec"  : E.FUNDING_EXIT_GRACE_SEC,
             "stop_loss_mult"     : E.STOP_LOSS_FUNDING_MULT,
             "stop_loss_min_pct"  : E.STOP_LOSS_MIN_PCT,
+            "stop_cooldown_sec"  : E.STOP_COOLDOWN_SEC,
             "reversion_fraction" : E.REVERSION_FRACTION,
             "min_net_pct"        : E.MIN_NET_PCT,
             "max_hold_sec"       : E.MAX_HOLD_SEC,

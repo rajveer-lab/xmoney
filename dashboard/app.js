@@ -540,17 +540,26 @@
     S.cfgKey = key;
     const t = c.tiers;
     const rows = [
+      ["Strategy", c.strategy === "funding" ? "Funding capture, convergence as the second earner"
+        : c.strategy === "spread" ? "Spread mean reversion only" : "Funding, falling back to spread"],
       ["Stream", c.stream_type === "bookTicker" ? "bookTicker (top of book, per tick)" : c.stream_type],
-      ["Entry gate", c.sd_threshold + "σ from rolling mean, then cost + slippage gates"],
-      ["Exchange fee (round trip)", c.exchange_fee_pct + "%"],
-      ["Exit", fmtNum(c.reversion_fraction * 100, 0) + "% deviation reverted (net ≥ 0), else ≥ " + c.min_net_pct + "% net"],
-      ["Max hold", c.max_hold_sec + "s"],
-      ["Reconnect cooldown", c.cooldown_sec + "s"],
+      ["Minimum return", fmtNum(c.min_funding_apr, 0) + "% annualised, checked at entry and at every payment"],
+      ["Minimum funding", c.min_funding_pct + "% per payment"],
+      ["Edge vs cost", "must beat friction by " + c.edge_friction_mult + "×, not merely exceed it"],
+      ["Coin filter", "skip unless the stop sits ≥ " + c.min_stop_sigmas + " of that coin's own σ away"],
+      ["Entry window", fmtDur(c.funding_window_sec) + " before a payment"],
+      ["Fees", c.fee_tier + " · round trip " + c.fee_rt_maker + "% maker / " + c.fee_rt_taker +
+        "% taker · charged at " + c.fill_fee_type],
+      ["Execution", "both legs at market after " + c.entry_delay_sec * 1000 + "ms"],
+      ["Exit", fmtNum(c.reversion_fraction * 100, 0) + "% of the gap closed, or the next payment stops being worth the capital"],
+      ["Stop loss", c.stop_loss_mult + "× the funding collected (floor " + c.stop_loss_min_pct +
+        "%), measured from entry · " + fmtDur(c.stop_cooldown_sec ?? 120) + " cooldown after one"],
+      ["Max hold", fmtDur(c.max_hold_sec) + " (spread) · safety ceiling only for funding trades"],
       ["Min notional", "$" + c.min_notional_usd + " · " + c.notional_steps + " sizing steps · no max (liquidity-capped)"],
       ["Simulated latency", c.entry_delay_sec === 0 && c.exit_delay_sec === 0 ? "None — fills at the triggering tick"
         : "entry " + c.entry_delay_sec * 1000 + "ms · exit " + c.exit_delay_sec * 1000 + "ms"],
-      ["Rolling window", "fast " + t.fast.window + "×" + t.fast.bucket_sec + "s · medium " + t.medium.window + "×" + t.medium.bucket_sec +
-        "s · slow " + t.slow.window + "×" + t.slow.bucket_sec + "s"],
+      ["Rolling mean", "fast " + t.fast.window + "×" + t.fast.bucket_sec + "s · medium " + t.medium.window + "×" + t.medium.bucket_sec +
+        "s · slow " + t.slow.window + "×" + t.slow.bucket_sec + "s — defines what the gap reverts to"],
       ["Coins per WebSocket", String(c.coins_per_ws)],
       ["Trade log", c.master_csv],
     ];
