@@ -123,7 +123,9 @@ def main():
     ap.add_argument("--coins", default="", help="comma separated, e.g. LSK,ONE,XTZ,SOL")
     ap.add_argument("--base-port", type=int, default=8100, help="first engine port (default 8100)")
     ap.add_argument("--grid-port", type=int, default=8099, help="grid page port (default 8099)")
-    ap.add_argument("--no-open", action="store_true", help="don't open a browser")
+    ap.add_argument("--no-open", action="store_true", help="don't open any browser window")
+    ap.add_argument("--grid", action="store_true",
+                    help="also open the single-page grid (needs a browser that allows framing)")
     args = ap.parse_args()
 
     tiers = [t.strip().upper() for t in args.tiers.split(",") if t.strip()]
@@ -136,11 +138,21 @@ def main():
         time.sleep(0.6)          # stagger the WS handshakes
 
     srv = serve_grid(args.grid_port, tiers, ports)
-    url = f"http://127.0.0.1:{args.grid_port}"
-    print(f"\n  All four side by side → {url}")
+    grid_url = f"http://127.0.0.1:{args.grid_port}"
+    print(f"\n  One window per tier opens automatically.")
+    print(f"  Grid view (only if your browser allows framing) → {grid_url}")
     print("  Each coin still needs its warm-up before it can trade. Ctrl+C stops everything.\n")
+
     if not args.no_open:
-        threading.Timer(2.5, lambda: webbrowser.open(url)).start()
+        # A window per tier is the reliable view — some browsers refuse to frame
+        # localhost pages at all, which leaves the grid blank with no error.
+        def open_windows():
+            for port in ports:
+                webbrowser.open_new(f"http://127.0.0.1:{port}")
+                time.sleep(0.4)
+            if args.grid:
+                webbrowser.open_new(grid_url)
+        threading.Timer(2.5, open_windows).start()
 
     def stop(*_):
         print("\nstopping…")
