@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Spot-Perp Reversion</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="topbar">
+    <div class="brand">
+      <h1>Spot–Perp Reversion</h1>
+      <span id="badge" class="badge" title="No real orders are placed">Paper</span>
+    </div>
+    <div class="topbar-right">
+      <span id="conn" class="conn" data-state="connecting" role="status">
+        <span class="dot"></span><span id="conn-text">Connecting…</span>
+      </span>
+      <button id="theme" class="btn" type="button">Dark</button>
+      <button id="pause" class="btn btn-primary" type="button" disabled>Pause entries</button>
+    </div>
+  </header>
+  <p id="subline" class="subline">&nbsp;</p>
+  <div id="banners" aria-live="polite"></div>
+
+  <main>
+    <!-- KPIs -->
+    <section class="kpis" aria-label="Summary">
+      <div class="card tile hero">
+        <div class="label">Net PnL</div>
+        <div id="k-net" class="hero-value">$0.00</div>
+        <div class="sub"><span id="k-vwap" class="num">–</span> volume-weighted per trade</div>
+        <div class="sub"><span id="k-unreal" class="num">–</span> unrealized on open positions</div>
+      </div>
+      <div class="card tile">
+        <div class="label">Trades closed</div>
+        <div id="k-trades" class="value num">0</div>
+        <div id="k-wl" class="sub num">–</div>
+      </div>
+      <div class="card tile">
+        <div class="label">Notional traded</div>
+        <div id="k-notional" class="value num">$0</div>
+        <div class="sub">both legs, per trade</div>
+      </div>
+      <div class="card tile">
+        <div class="label">Open positions</div>
+        <div id="k-open" class="value num">0</div>
+        <div id="k-deployed" class="sub num">–</div>
+      </div>
+      <div class="card tile">
+        <div class="label">Coins ready</div>
+        <div id="k-ready" class="value num">0/0</div>
+        <div id="k-ready-sub" class="sub num">–</div>
+      </div>
+    </section>
+
+    <!-- Equity + open positions -->
+    <section class="row2">
+      <div class="card">
+        <div class="card-h">
+          <h2>Cumulative net PnL by trade</h2>
+          <span class="aside"><button id="to-table" class="link" type="button">View as table</button></span>
+        </div>
+        <div class="card-b">
+          <div id="chart"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h2>Open positions</h2><span id="open-aside" class="aside num"></span></div>
+        <div class="card-b"><div id="open-list" class="open-list"></div></div>
+      </div>
+    </section>
+
+    <!-- Tabs -->
+    <section class="card" aria-label="Details">
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" id="tab-coins"  aria-controls="panel-coins"  aria-selected="true"  data-tab="coins">Coins<span id="n-coins" class="n"></span></button>
+        <button class="tab" role="tab" id="tab-trades" aria-controls="panel-trades" aria-selected="false" data-tab="trades" tabindex="-1">Trades<span id="n-trades" class="n"></span></button>
+        <button class="tab" role="tab" id="tab-feeds"  aria-controls="panel-feeds"  aria-selected="false" data-tab="feeds"  tabindex="-1">Feeds<span id="n-feeds" class="n"></span></button>
+        <button class="tab" role="tab" id="tab-config" aria-controls="panel-config" aria-selected="false" data-tab="config" tabindex="-1">Config</button>
+      </div>
+
+      <div id="panel-coins" class="panel" role="tabpanel" aria-labelledby="tab-coins">
+        <div class="filters">
+          <input id="q" type="search" placeholder="Search coin…" aria-label="Search coin" autocomplete="off">
+          <div id="chips" class="chips" role="group" aria-label="Filter by state"></div>
+          <span class="spacer"></span>
+          <span id="coin-count" class="count num"></span>
+        </div>
+        <div class="tbl-wrap">
+          <table id="coin-table">
+            <caption class="sr-only">Per-coin live status and results</caption>
+            <thead><tr id="coin-head"></tr></thead>
+            <tbody id="coin-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="panel-trades" class="panel" role="tabpanel" aria-labelledby="tab-trades" hidden>
+        <div class="filters">
+          <input id="tq" type="search" placeholder="Search coin…" aria-label="Search trades by coin" autocomplete="off">
+          <select id="texit" aria-label="Filter by exit type">
+            <option value="">All exits</option>
+            <option value="reversion">Reversion</option>
+            <option value="min-profit">Min-profit</option>
+            <option value="timeout">Timeout</option>
+            <option value="watchdog">Watchdog</option>
+          </select>
+          <span class="spacer"></span>
+          <span id="trade-count" class="count num"></span>
+          <a class="link" href="/api/trades.csv" download>Download CSV</a>
+        </div>
+        <div class="tbl-wrap">
+          <table id="trade-table">
+            <caption class="sr-only">Closed trades, newest first</caption>
+            <thead><tr>
+              <th>Closed</th><th>Coin</th><th>Side</th>
+              <th class="r">Notional</th><th class="r">Hold</th>
+              <th class="r">Gross %</th><th class="r">Net %</th><th class="r">Net $</th>
+              <th>Exit</th><th class="r">Slippage %</th>
+            </tr></thead>
+            <tbody id="trade-body"></tbody>
+          </table>
+        </div>
+        <p id="trade-empty" class="empty" hidden>No closed trades yet.</p>
+      </div>
+
+      <div id="panel-feeds" class="panel" role="tabpanel" aria-labelledby="tab-feeds" hidden>
+        <div class="tbl-wrap">
+          <table id="feed-table">
+            <caption class="sr-only">Exchange WebSocket connections</caption>
+            <thead><tr>
+              <th>Feed</th><th>Status</th><th class="r">Coins</th><th class="r">Msgs/s</th>
+              <th class="r" title="Perp: Binance event time → handled here (network + processing). Spot bookTicker carries no timestamp.">Lag</th>
+              <th class="r">Up for</th><th class="r">Reconnects</th><th>Last error</th>
+            </tr></thead>
+            <tbody id="feed-body"></tbody>
+          </table>
+        </div>
+        <p id="feed-empty" class="empty" hidden>No exchange connection (demo mode feeds synthetic ticks).</p>
+        <p class="cfg-note">Each feed carries up to 50 coins. A drop only pauses the coins on that feed; it reopens
+          within seconds, and a feed that goes silent for 10s is reopened automatically. Quiet coins keep their last
+          quote while their feed is live — bookTicker only sends a message when the top of book changes.</p>
+      </div>
+
+      <div id="panel-config" class="panel" role="tabpanel" aria-labelledby="tab-config" hidden>
+        <dl id="cfg" class="cfg"></dl>
+        <p class="cfg-note">Read-only. Change strategy parameters in <code>backend/engine.py</code> or with environment
+          variables, then restart. Only <em>new entries</em> can be paused from this page.</p>
+      </div>
+    </section>
+  </main>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

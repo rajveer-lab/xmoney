@@ -1,0 +1,6 @@
+websocket-client>=1.7
+numpy>=1.26
+colorama>=0.4.6
+certifi>=2024.2.2
+Flask>=3.0
+pytest>=8.0

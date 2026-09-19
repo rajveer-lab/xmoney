@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# engine output written at runtime (paper trades, scan reports)
+data/
