@@ -879,3 +879,31 @@ def test_no_convergence_to_collect_when_the_gap_starts_on_the_wrong_side(eng, mo
 
     cs.open_position = make_funding_pos(direction=+1, entry_deviation=+0.04, entry_mean=0.0)
     assert build_state()[0]["coins"][0]["position"]["conv_available"] is True
+
+
+def test_the_table_cannot_disagree_with_the_gate_about_apr(eng, monkeypatch):
+    """The dashboard used to show rate x payments per year while the gate decided
+    on return per hour of capital committed, so coins showing 8% were opening
+    against a 12% minimum."""
+    monkeypatch.setattr(E, "MIN_FUNDING_PCT", 0.001)
+    monkeypatch.setattr(E, "EDGE_FRICTION_MULT", 1.0)
+    monkeypatch.setattr(E, "MIN_FUNDING_APR", 12.0)
+    cs = make_coin()
+    monkeypatch.setattr(E, "ALL_CS", [cs])
+    E.process_spot_tick(cs, book(100.0))
+    E.process_perp_tick(cs, book(100.0))
+
+    # an 8h coin whose payment is only ~1h away ties capital up for an hour,
+    # so the headline yield understates what the trade actually returns
+    set_funding(cs, 0.0080, 3600, interval_h=8.0)
+    friction = 0.0002
+    cs.stats["live_round_trip"] = friction
+
+    gate_apr = E.funding_trade_apr(0.0080, 3600, friction)
+    shown    = build_state()[0]["coins"][0]["funding_apr"]
+    assert shown == pytest.approx(gate_apr, abs=0.1), "table must show what the gate uses"
+
+    yield_apr = build_state()[0]["coins"][0]["funding_yield"]
+    assert yield_apr == pytest.approx(0.0080 * 3 * 365, abs=0.1)   # payload rounds to 1dp
+    assert gate_apr > yield_apr          # short hold beats the headline
+    assert E.funding_entry_check(cs, friction) is not None

@@ -181,7 +181,12 @@ def _coin_row(cs, now, feed_of):
         "g3_buffer_pct" : _f(st["slip_buffer"]),
         "g3_samples"    : n_slips,
         "funding_pct"   : _f(fv[0]) if fv else None,
-        "funding_apr"   : _f(fv[0] * (24.0 / fv[2]) * 365.0, 1) if fv else None,
+        # What this trade would return on the capital it ties up: the number the
+        # entry gate actually decides on.
+        "funding_apr"   : _f(E.funding_trade_apr(fv[0], fv[1], st["live_round_trip"] or 0.0), 1)
+                          if fv else None,
+        # The coin's headline yield, holding through every payment for a year.
+        "funding_yield" : _f(fv[0] * (24.0 / fv[2]) * 365.0, 1) if fv else None,
         "funding_in_sec": _f(max(0.0, fv[1]), 0) if fv else None,
         "funding_ivl_h" : fv[2] if fv else None,
         "basis_vol_pct" : _f(vol),

@@ -1328,6 +1328,23 @@ def execute_exit(cs, pos, exit_reason):
 # TICK-LEVEL GATE CHECK — entry
 # ══════════════════════════════════════════════════════════════════════════════
 
+def funding_trade_apr(rate_pct, secs_to_stamp, round_trip):
+    """Return on capital for this one trade, annualised.
+
+    Not the same thing as the coin's headline yield. That is rate x payments per
+    year, which assumes holding through every payment forever. This is what the
+    money actually earns while it is committed: the edge after costs, spread over
+    the hours we wait for the payment plus the unwind. An 8h coin whose stamp is
+    two hours away ties capital up for two hours, not eight, so the same payment
+    is a better use of it than the headline number suggests.
+
+    The entry gate and the dashboard both call this, so the table can never
+    disagree with the decision it is showing.
+    """
+    edge = abs(rate_pct) - round_trip
+    hold_hours = max((secs_to_stamp + FUNDING_EXIT_GRACE_SEC / 2.0) / 3600.0, 1.0 / 60.0)
+    return edge * (8760.0 / hold_hours)
+
 def funding_entry_check(cs, round_trip):
     """Is there a funding stamp worth holding into?
 
@@ -1377,13 +1394,8 @@ def funding_entry_check(cs, round_trip):
     if abs(rate_pct) < EDGE_FRICTION_MULT * round_trip:
         return None
 
-    # Judged as a rate of return, not an absolute. Capital is committed until we
-    # exit, which is the stamp plus however long the unwind takes, not just the
-    # countdown, or a trade entered seconds before a stamp would look
-    # near-infinitely attractive.
-    hold_hours = max((secs_to_stamp + FUNDING_EXIT_GRACE_SEC / 2.0) / 3600.0, 1.0 / 60.0)
-    apr        = total_expected * (8760.0 / hold_hours)
-    if apr < MIN_FUNDING_APR:
+    # Judged as a rate of return, not an absolute.
+    if funding_trade_apr(rate_pct, secs_to_stamp, round_trip) < MIN_FUNDING_APR:
         return None
 
     return direction, rate_pct, secs_to_stamp

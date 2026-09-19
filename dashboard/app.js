@@ -312,7 +312,7 @@
     { key: "symbol", label: "Coin", cls: "sym", val: (c) => c.symbol, str: true },
     { key: "state", label: "State", val: (c) => STATE_ORDER[c.state] ?? 9 },
     { key: "funding", label: "Funding %", r: true, val: (c) => c.funding_pct },
-    { key: "apr", label: "Funding APR", r: true, val: (c) => c.funding_apr },
+    { key: "apr", label: "Trade APR", r: true, val: (c) => c.funding_apr },
     { key: "stamp", label: "Pays in", r: true, val: (c) => c.funding_in_sec },
     { key: "spread", label: "Gap to spot %", r: true, val: (c) => c.spread_pct },
     // the convergence half of the edge: how far the basis sits from its own mean
@@ -403,8 +403,18 @@
                            : "Negative: shorts pay longs, so we long the perp to receive") +
         (isNum(c.funding_ivl_h) ? "\nSettles every " + c.funding_ivl_h + "h" : "")
       : "No funding data for this coin yet";
-    setText(k.apr, isNum(c.funding_apr) ? fmtNum(Math.abs(c.funding_apr), 0) + "%" : "–");
-    setCls(k.apr, "r num " + (!isNum(c.funding_apr) ? "dim" : payable ? "pos" : ""));
+    const minApr = S.state?.config?.min_funding_apr ?? 12;
+    setText(k.apr, isNum(c.funding_apr) ? fmtNum(c.funding_apr, 0) + "%" : "–");
+    setCls(k.apr, "r num " + (!isNum(c.funding_apr) ? "dim"
+                              : c.funding_apr >= minApr ? "pos" : "neg"));
+    k.apr.title = isNum(c.funding_apr)
+      ? "What this trade returns on the capital it ties up, annualised, after costs.\n" +
+        "This is the number the entry gate decides on; it needs " + minApr + "%.\n" +
+        (isNum(c.funding_yield)
+          ? "The coin's headline yield, holding through every payment for a year, is " +
+            fmtNum(Math.abs(c.funding_yield), 0) + "%."
+          : "")
+      : "No funding data yet";
     setText(k.stamp, isNum(c.funding_in_sec) ? fmtDur(c.funding_in_sec) : "–");
     k.stamp.title = "Funding only pays whoever is holding at the settlement moment";
 
