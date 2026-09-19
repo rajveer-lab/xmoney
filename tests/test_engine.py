@@ -757,3 +757,24 @@ def test_funding_hold_ceiling_is_a_safety_net_not_the_strategy(eng):
     short_stamp = {"trade_kind": "funding", "secs_to_funding": 120.0}
     assert E.max_hold_for(short_stamp) >= E.FUNDING_MAX_HOLD_SEC
     assert E.max_hold_for({"trade_kind": "spread"}) == E.MAX_HOLD_SEC
+
+
+def test_exits_cross_immediately_instead_of_resting(eng, monkeypatch):
+    """Entering is optional, so resting for a better price is free. Exiting is
+    not: waiting 200ms for a passive fill let one LSK stop sized at 0.22% fill
+    at -3.16%, because the perp bid fell 3.4% during the wait."""
+    monkeypatch.setattr(E, "MAKER_FIRST", True)
+    monkeypatch.setattr(E, "MAKER_WAIT_MS", 300.0)
+    monkeypatch.setattr(E, "MAKER_ON_EXIT", False)
+    cs = make_coin()
+    E.process_spot_tick(cs, book(100.0))
+    E.process_perp_tick(cs, book(100.0))
+
+    t0 = time.time()
+    _, _, st, pt, waited = E.execute_two_leg_fill(cs, +1, 100.0, "exit", allow_cancel=False)
+    assert (st, pt) == ("taker", "taker")
+    assert waited < 50 and (time.time() - t0) < 0.1      # did not sit out the window
+
+    # Entries still rest first, where the wait costs us nothing.
+    _, _, st, pt, waited = E.execute_two_leg_fill(cs, +1, 100.0, "entry")
+    assert waited >= 300.0

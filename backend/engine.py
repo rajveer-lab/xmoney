@@ -151,6 +151,12 @@ EXCHANGE_FEE_PCT   = round_trip_fee_pct()
 # Post passive at the touch; if unfilled after MAKER_WAIT_MS, cross and take.
 MAKER_FIRST        = os.environ.get("MAKER_FIRST", "1") == "1"
 MAKER_WAIT_MS      = float(os.environ.get("MAKER_WAIT_MS", 200.0))
+# Entering is optional, so it is worth resting for a better price: if we never
+# fill we simply do not trade. Exiting is not optional. We are already exposed,
+# and a stop that waits 200ms for a passive fill lets the market run while it
+# waits. One LSK stop sized at 0.22% filled at -3.16% that way, because the perp
+# bid fell 3.4% during the wait. Exits cross immediately.
+MAKER_ON_EXIT      = os.environ.get("MAKER_ON_EXIT", "0") == "1"
 # If one leg fills maker and the other times out, take the laggard immediately
 # rather than sitting delta-exposed.
 LEG_RISK_POLICY    = os.environ.get("LEG_RISK_POLICY", "take").strip().lower()
@@ -837,8 +843,10 @@ def execute_two_leg_fill(cs, direction, notional, phase, allow_cancel=True):
     spot_post = _post_price(snap, "spot", spot_side)
     perp_post = _post_price(snap, "perp", perp_side)
 
+    rest_first = MAKER_FIRST and (phase == "entry" or MAKER_ON_EXIT)
+
     spot_maker = perp_maker = False
-    if MAKER_FIRST and spot_post is not None and perp_post is not None and MAKER_WAIT_MS > 0:
+    if rest_first and spot_post is not None and perp_post is not None and MAKER_WAIT_MS > 0:
         deadline = t0 + MAKER_WAIT_MS / 1000.0
         while True:
             snap = get_fill_snap(cs)
