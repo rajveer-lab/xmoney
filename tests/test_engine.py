@@ -690,14 +690,14 @@ def test_both_legs_fill_together_at_the_book(eng, monkeypatch):
     snap = E.get_fill_snap(cs)
 
     t0 = time.time()
-    sp, pp, sf, pf, waited = E.execute_two_leg_fill(cs, +1, 100.0, "entry")
+    sp, pp, sf, pf, waited, _snap = E.execute_two_leg_fill(cs, +1, 100.0, "entry")
     assert (sf, pf) == ("maker", "maker")          # charged as configured
     assert waited < 20 and (time.time() - t0) < 0.05   # no waiting around
     assert sp == pytest.approx(E._best_ask(snap, "spot"))   # bought, so crossed up
     assert pp == pytest.approx(E._best_bid(snap, "perp"))   # sold, so crossed down
 
     monkeypatch.setattr(E, "FILL_FEE_TYPE", "taker")
-    _, _, sf, pf, _ = E.execute_two_leg_fill(cs, +1, 100.0, "exit", allow_cancel=False)
+    _, _, sf, pf, _, _ = E.execute_two_leg_fill(cs, +1, 100.0, "exit", allow_cancel=False)
     assert (sf, pf) == ("taker", "taker")
 
 
@@ -981,3 +981,28 @@ def test_a_gap_that_has_not_converged_still_waits_for_the_payment(eng, monkeypat
     set_funding(cs, 0.001, 600)
     E.check_exit_on_tick(cs, E.get_fill_snap(cs))
     assert not cs.exit_pending
+
+
+def test_the_stop_cannot_close_a_winning_trade(eng, monkeypatch):
+    """The baseline is what unwinding would have cost at entry. Reading a fresh
+    book for it let a favourable tick land in between and inflate it, and because
+    the stop measures from the baseline, that closed profitable positions as
+    'stop loss'. It must come from the book we actually filled on."""
+    cs = make_coin()
+    E.process_spot_tick(cs, book(100.0))
+    E.process_perp_tick(cs, book(100.0))
+    sp, pp, _, _, _, fill_snap = E.execute_two_leg_fill(cs, +1, 1000.0, "entry")
+
+    # a favourable tick arrives immediately after the fill
+    E.process_perp_tick(cs, book(99.5))
+
+    pos = make_funding_pos(entry_spot_fill=sp, entry_perp_fill=pp, notional_usd=1000.0)
+    # measured against the fill's own book, unwinding costs us: never a profit
+    xs, xp = E.get_exit_vwap(fill_snap, +1, 1000.0)
+    _, baseline, _ = E.calc_pnl(pos, xs, xp, 0.0)
+    assert baseline <= 0, "a fresh pair can never start in profit"
+
+    # measured against the later book it looks like free money, which is the bug
+    xs2, xp2 = E.get_exit_vwap(E.get_fill_snap(cs), +1, 1000.0)
+    _, inflated, _ = E.calc_pnl(pos, xs2, xp2, 0.0)
+    assert inflated > baseline

@@ -880,7 +880,7 @@ def execute_two_leg_fill(cs, direction, notional, phase, allow_cancel=True):
         return None
 
     return (spot_price, perp_price, FILL_FEE_TYPE, FILL_FEE_TYPE,
-            (time.time() - t0) * 1000.0)
+            (time.time() - t0) * 1000.0, snap)
 
 def realised_fee_pct(pos, exit_spot_type, exit_perp_type):
     """Actual fee cost of all four executions, given how each one filled."""
@@ -1146,7 +1146,7 @@ def execute_entry(cs, direction, signal_spread, signal_deviation,
         with cs.lock:
             cs.entry_pending = False
         return
-    entry_spot, entry_perp, spot_fill_type, perp_fill_type, maker_wait_ms = fill
+    entry_spot, entry_perp, spot_fill_type, perp_fill_type, maker_wait_ms, fill_snap = fill
 
     # Recompute fill spread/deviation from the realised prices
     fill_spread    = (entry_perp - entry_spot) / entry_spot * 100
@@ -1206,7 +1206,10 @@ def execute_entry(cs, direction, signal_spread, signal_deviation,
     # the spread to get in and would cross it again to get out. That is the trade's
     # starting line, not a loss. Recording it lets the stop measure real adverse
     # movement instead of firing on the entry cost the instant we open.
-    exit_spot_now, exit_perp_now = get_exit_vwap(get_fill_snap(cs), direction, notional)
+    # Measured against the very book we filled on. Reading a fresh one instead let
+    # a favourable tick land in between and inflate the baseline, and since the
+    # stop measures from it, that stopped winning positions out.
+    exit_spot_now, exit_perp_now = get_exit_vwap(fill_snap, direction, notional)
     if exit_spot_now is not None and exit_perp_now is not None:
         with cs.lock:
             if cs.open_position is not None:
@@ -1243,7 +1246,7 @@ def execute_exit(cs, pos, exit_reason):
         with cs.lock:
             cs.exit_pending = False
         return
-    exit_spot, exit_perp, exit_spot_type, exit_perp_type, exit_maker_wait_ms = fill
+    exit_spot, exit_perp, exit_spot_type, exit_perp_type, exit_maker_wait_ms, _snap = fill
 
     gross, net, usd = calc_pnl(pos, exit_spot, exit_perp, round_trip_pct,
                                exit_spot_type, exit_perp_type)
