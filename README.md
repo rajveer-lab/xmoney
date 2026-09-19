@@ -80,12 +80,17 @@ because the perp bid fell 3.4% while it waited.
    from where the trade started rather than from zero. A pair opens already down one round
    trip of spread; comparing raw PnL against the stop fired the instant we opened on any
    coin whose spread was wider than the stop, then reopened and fired again next tick.
-2. **Before the payment, nothing else closes it.** The payment is the reason we are here.
-3. **Convergence done** — the gap has moved `REVERSION_FRACTION` of its starting size **in
+2. **Convergence banked** — the gap can run our way long before the payment lands. Once it
+   has, holding on only risks that gain for whatever payment is still to come, and waiting
+   does not make the payment bigger: funding is a time-weighted average over the whole
+   interval, so it barely moves when the gap does. If the remaining payment is smaller than
+   the profit already on the table, we take the profit.
+3. **Otherwise the payment is why we are here**, so we wait for it.
+4. **Convergence done** — the gap has moved `REVERSION_FRACTION` of its starting size **in
    our favour**. Which way counts depends on the side we are on: a short perp profits as the
    gap falls, a long perp as it rises. When the gap starts on the wrong side, closing it
    *costs* us, so there is no second payday and the trade rests on the funding alone.
-4. **Otherwise, decided at each stamp, not on a clock.** Is the next payment still in our
+5. **After the payment, decided at each stamp, not on a clock.** Is the next payment still in our
    favour, and does the return from here still clear the hurdle? If yes we stay and collect
    again — an hourly pair pays every hour we hold it. If no, we leave.
 

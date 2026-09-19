@@ -320,6 +320,7 @@ def _exit_type(reason):
     if r.startswith("STOP LOSS"):  return "stop-loss"
     if r.startswith("FUNDING"):    return "funding"
     if r.startswith("NOT WORTH"): return "not-worth-holding"
+    if r.startswith("CONVERGENCE"): return "convergence-banked"
     return "other"
 
 def record_trade_event(ev):
@@ -1605,7 +1606,42 @@ def check_exit_on_tick(cs, snap):
                              daemon=True).start()
             return
 
-        # Nothing else closes before the stamp, the payment is why we are here.
+        # ── Convergence already banked? ─────────────────────────────────────
+        # The gap can run our way long before the payment lands. Once it has,
+        # the second earner is in the price and holding on only risks giving it
+        # back for whatever funding is still to come. So weigh the two: if the
+        # remaining payment is smaller than the profit now sitting on the table,
+        # take the profit. Funding barely moves when the gap does (it is a
+        # time-weighted average over the whole interval), so waiting does not
+        # make the payment any bigger, it just leaves the gain exposed.
+        entry_gap     = pos["entry_deviation"]
+        moved_our_way = (entry_gap - curr_deviation) * pos["direction"]
+        conv_open     = entry_gap * pos["direction"] > 0
+        banked = (abs_entry_dev >= MIN_CONVERGENCE_DEV_PCT and conv_open
+                  and moved_our_way >= abs_entry_dev * REVERSION_FRACTION)
+
+        if banked and net > 0:
+            fv_now = funding_view(cs)
+            still_to_come = 0.0
+            if fv_now is not None:
+                rate_now, _secs, _iv = fv_now
+                still_to_come = rate_now if pos["direction"] == +1 else -rate_now
+            if still_to_come < net:
+                with cs.lock:
+                    if cs.open_position is None or cs.exit_pending:
+                        return
+                    cs.open_position["profit_target_hit"] = True
+                    cs.exit_pending = True
+                    pos_snap = cs.open_position
+                reason = (f"CONVERGENCE BANKED  moved our way "
+                          f"{moved_our_way / abs_entry_dev * 100:.0f}%  "
+                          f"holding {net:+.5f}% for a {still_to_come:+.5f}% payment  "
+                          f"dev:{entry_gap:+.5f}%→{curr_deviation:+.5f}%")
+                threading.Thread(target=execute_exit, args=(cs, pos_snap, reason),
+                                 daemon=True).start()
+                return
+
+        # Otherwise the payment is why we are here, so we wait for it.
         if not past_stamp:
             return
 

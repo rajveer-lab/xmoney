@@ -939,3 +939,45 @@ def test_a_gap_that_snaps_is_refused_even_when_deviation_looks_calm(eng, monkeyp
     snapping = with_gaps([0.0] * 30 + [0.9, 0.0, 0.9, 0.0, 0.9, 0.0, 0.9, 0.0, 0.9, 0.0])
     assert E.basis_jump_pct(snapping) > 0.5
     assert E.funding_entry_check(snapping, 0.001) is None
+
+
+def test_banked_convergence_is_taken_when_the_payment_is_smaller_than_the_gain(eng, monkeypatch):
+    """The gap can run our way long before the payment lands. Holding on then
+    risks the gain already on the table for a payment that waiting does not make
+    any bigger, because funding is an average over the whole interval."""
+    monkeypatch.setattr(E, "REVERSION_FRACTION", 0.9)
+    cs = make_coin()
+    E.process_spot_tick(cs, book(100.0))
+    E.process_perp_tick(cs, book(100.0))          # gap now ~0: fully converged
+    # entered when the gap was 0.20% wide and it has since closed, so the
+    # position is genuinely in profit rather than just flat
+    base = dict(direction=+1, entry_deviation=0.20, entry_mean=0.0,
+                entry_spot_fill=99.9, entry_perp_fill=100.1,
+                stamps_crossed=0, stop_loss_pct=5.0, entry_mark_pct=0.0)
+
+    # a big gain on the table, a tiny payment still to come: take the gain
+    cs.open_position = make_funding_pos(**base)
+    set_funding(cs, 0.001, 600)
+    E.check_exit_on_tick(cs, E.get_fill_snap(cs))
+    assert cs.exit_pending
+    assert E._exit_type("CONVERGENCE BANKED moved our way 100%") == "convergence-banked"
+
+    # same gain, but a payment worth more than it: keep waiting for the payment
+    cs.exit_pending = False
+    cs.open_position = make_funding_pos(**base)
+    set_funding(cs, 5.0, 600)
+    E.check_exit_on_tick(cs, E.get_fill_snap(cs))
+    assert not cs.exit_pending
+
+
+def test_a_gap_that_has_not_converged_still_waits_for_the_payment(eng, monkeypatch):
+    monkeypatch.setattr(E, "REVERSION_FRACTION", 0.9)
+    cs = make_coin()
+    E.process_spot_tick(cs, book(100.0))
+    E.process_perp_tick(cs, book(100.2))          # gap still wide open
+    cs.open_position = make_funding_pos(direction=+1, entry_deviation=0.20,
+                                        entry_mean=0.0, stamps_crossed=0,
+                                        stop_loss_pct=5.0, entry_mark_pct=0.0)
+    set_funding(cs, 0.001, 600)
+    E.check_exit_on_tick(cs, E.get_fill_snap(cs))
+    assert not cs.exit_pending
