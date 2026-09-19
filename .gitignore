@@ -4,3 +4,5 @@ __pycache__/
 
 # engine output written at runtime (paper trades, scan reports)
 data/
+*.log
+compare_*/
