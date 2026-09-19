@@ -166,10 +166,10 @@
     const warming = (sc.warming || 0) + (sc.connecting || 0);
     if (warming > 0) {
       const t = c.tiers.fast;
-      b.push(["info", "Building the mean",
-        warming + " of " + g.coins_total + " coins are still building their rolling mean (about " +
-        fmtDur(t.window * t.bucket_sec) + "). Funding trades do not wait for it; only the " +
-        "convergence half of the edge is priced once the mean is there."]);
+      b.push(["info", "Measuring",
+        warming + " of " + g.coins_total + " coins are still measuring how far their gap " +
+        "normally moves, which takes a few seconds. Funding trades wait only for that, " +
+        "not for the rolling window."]);
     }
     const down = (st.feeds || []).filter((f) => f.status !== "connected");
     if (down.length && st.uptime_sec > 15) {
@@ -310,9 +310,9 @@
     { key: "funding", label: "Funding %", r: true, val: (c) => c.funding_pct },
     { key: "apr", label: "Funding APR", r: true, val: (c) => c.funding_apr },
     { key: "stamp", label: "Pays in", r: true, val: (c) => c.funding_in_sec },
-    { key: "spread", label: "Basis %", r: true, val: (c) => c.spread_pct },
+    { key: "spread", label: "Gap to spot %", r: true, val: (c) => c.spread_pct },
     // the convergence half of the edge: how far the basis sits from its own mean
-    { key: "z", label: "Basis σ", r: true, val: (c) => (isNum(c.z) ? Math.abs(c.z) : null) },
+    { key: "z", label: "Gap σ", r: true, val: (c) => (isNum(c.z) ? Math.abs(c.z) : null) },
     // Under the threshold the gap routinely moves further than funding can pay for.
     { key: "safety", label: "Stop σ", r: true, val: (c) => c.stop_sigmas },
     { key: "rt", label: "Friction %", r: true, val: (c) => c.rt_pct },
@@ -543,23 +543,23 @@
       ["Strategy", c.strategy === "funding" ? "Funding capture, convergence as the second earner"
         : c.strategy === "spread" ? "Spread mean reversion only" : "Funding, falling back to spread"],
       ["Stream", c.stream_type === "bookTicker" ? "bookTicker (top of book, per tick)" : c.stream_type],
-      ["Minimum return", fmtNum(c.min_funding_apr, 0) + "% annualised, checked at entry and at every payment"],
+      ["Entry", "funding alone: " + fmtNum(c.min_funding_apr, 0) + "% annualised minimum, checked again at every payment"],
       ["Minimum funding", c.min_funding_pct + "% per payment"],
       ["Edge vs cost", "must beat friction by " + c.edge_friction_mult + "×, not merely exceed it"],
       ["Coin filter", "skip unless the stop sits ≥ " + c.min_stop_sigmas + " of that coin's own σ away"],
-      ["Entry window", fmtDur(c.funding_window_sec) + " before a payment"],
+      ["Entry window", fmtNum((c.funding_window_frac ?? 1) * 100, 0) + "% of each coin\u2019s own funding cycle"],
       ["Fees", c.fee_tier + " · round trip " + c.fee_rt_maker + "% maker / " + c.fee_rt_taker +
         "% taker · charged at " + c.fill_fee_type],
       ["Execution", "both legs at market after " + c.entry_delay_sec * 1000 + "ms"],
-      ["Exit", fmtNum(c.reversion_fraction * 100, 0) + "% of the gap closed, or the next payment stops being worth the capital"],
+      ["Exit", fmtNum(c.reversion_fraction * 100, 0) + "% of the gap to spot closed, or the next payment stops being worth the capital"],
       ["Stop loss", c.stop_loss_mult + "× the funding collected (floor " + c.stop_loss_min_pct +
         "%), measured from entry · " + fmtDur(c.stop_cooldown_sec ?? 120) + " cooldown after one"],
       ["Max hold", fmtDur(c.max_hold_sec) + " (spread) · safety ceiling only for funding trades"],
-      ["Min notional", "$" + c.min_notional_usd + " · " + c.notional_steps + " sizing steps · no max (liquidity-capped)"],
+      ["Trade size", "$" + c.min_notional_usd + " to $" + fmtNum(c.max_notional_usd, 0) + ", capped again by what the book can fill"],
       ["Simulated latency", c.entry_delay_sec === 0 && c.exit_delay_sec === 0 ? "None — fills at the triggering tick"
         : "entry " + c.entry_delay_sec * 1000 + "ms · exit " + c.exit_delay_sec * 1000 + "ms"],
-      ["Rolling mean", "fast " + t.fast.window + "×" + t.fast.bucket_sec + "s · medium " + t.medium.window + "×" + t.medium.bucket_sec +
-        "s · slow " + t.slow.window + "×" + t.slow.bucket_sec + "s — defines what the gap reverts to"],
+      ["Gap history", "fast " + t.fast.window + "×" + t.fast.bucket_sec + "s · medium " + t.medium.window + "×" + t.medium.bucket_sec +
+        "s · slow " + t.slow.window + "×" + t.slow.bucket_sec + "s — used to measure how far each gap normally moves"],
       ["Coins per WebSocket", String(c.coins_per_ws)],
       ["Trade log", c.master_csv],
     ];

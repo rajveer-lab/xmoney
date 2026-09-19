@@ -405,25 +405,25 @@ def test_funding_gate_direction_and_thresholds(eng, monkeypatch):
 
     # Positive rate → longs pay shorts → short the perp (direction +1) to receive.
     set_funding(cs, 0.05, 600)
-    assert E.funding_entry_check(cs, friction, 0.0)[0] == +1
+    assert E.funding_entry_check(cs, friction)[0] == +1
     # Negative rate → shorts pay longs → long the perp instead.
     set_funding(cs, -0.05, 600)
-    assert E.funding_entry_check(cs, friction, 0.0)[0] == -1
+    assert E.funding_entry_check(cs, friction)[0] == -1
 
     # Too small to bother with.
     set_funding(cs, 0.001, 600)
-    assert E.funding_entry_check(cs, friction, 0.0) is None
+    assert E.funding_entry_check(cs, friction) is None
     # Clears the absolute floor but not the multiple of friction, a penny trade.
     set_funding(cs, 0.012, 600)
-    assert E.funding_entry_check(cs, friction, 0.0) is None
+    assert E.funding_entry_check(cs, friction) is None
     # Good rate, but the stamp is outside the entry window.
     set_funding(cs, 0.05, 7200)
-    assert E.funding_entry_check(cs, friction, 0.0) is None
+    assert E.funding_entry_check(cs, friction) is None
     # Stale funding feed is not trusted.
     set_funding(cs, 0.05, 600)
     with cs.lock:
         cs.funding_ts = time.time() - 120
-    assert E.funding_entry_check(cs, friction, 0.0) is None
+    assert E.funding_entry_check(cs, friction) is None
 
 
 def test_funding_gate_rejects_a_good_rate_that_is_a_bad_rate_of_return(eng, monkeypatch):
@@ -435,9 +435,9 @@ def test_funding_gate_rejects_a_good_rate_that_is_a_bad_rate_of_return(eng, monk
     cs = make_coin()
     monkeypatch.setattr(E, "FUNDING_EXIT_GRACE_SEC", 0.0)   # isolate the countdown
     set_funding(cs, 0.05, 60)                      # 0.05% in a minute → huge APR
-    assert E.funding_entry_check(cs, 1e-6, 0.0) is not None
+    assert E.funding_entry_check(cs, 1e-6) is not None
     set_funding(cs, 0.05, 24 * 3600)               # same 0.05%, but a day of capital
-    assert E.funding_entry_check(cs, 1e-6, 0.0) is None
+    assert E.funding_entry_check(cs, 1e-6) is None
 
 
 def test_funding_settles_with_the_right_sign_when_a_stamp_passes(eng):
@@ -506,34 +506,6 @@ def test_funding_trade_is_not_timed_out_before_its_stamp(eng):
     assert E.max_hold_for(funding) >= 3000.0 + E.FUNDING_EXIT_GRACE_SEC
 
 
-def test_convergence_is_priced_into_the_funding_entry(eng, monkeypatch):
-    """One trade, two earners. Reversion helps a long-spot/short-perp book when
-    the spread sits above its mean, and hurts it when below."""
-    monkeypatch.setattr(E, "MIN_FUNDING_PCT", 0.001)
-    monkeypatch.setattr(E, "EDGE_FRICTION_MULT", 1.0)
-    monkeypatch.setattr(E, "MIN_FUNDING_APR", 0.0)
-    monkeypatch.setattr(E, "REVERSION_FRACTION", 0.9)
-    cs = make_coin()
-    set_funding(cs, 0.05, 600)                  # positive → direction +1
-
-    _, _, _, aligned = E.funding_entry_check(cs, 1e-6, +0.02)
-    assert aligned == pytest.approx(0.02 * 0.9)      # spread above mean: helps
-    _, _, _, adverse = E.funding_entry_check(cs, 1e-6, -0.02)
-    assert adverse == pytest.approx(-0.02 * 0.9)     # below mean: works against us
-
-
-def test_adverse_convergence_is_taken_when_funding_still_pays_for_it(eng, monkeypatch):
-    """Option (b): an adverse basis doesn't veto the trade, it just has to be
-    outweighed, but it does veto it once it outweighs the funding."""
-    monkeypatch.setattr(E, "MIN_FUNDING_PCT", 0.001)
-    monkeypatch.setattr(E, "EDGE_FRICTION_MULT", 1.0)
-    monkeypatch.setattr(E, "MIN_FUNDING_APR", 0.0)
-    monkeypatch.setattr(E, "REVERSION_FRACTION", 1.0)
-    cs = make_coin()
-    set_funding(cs, 0.10, 600)                  # direction +1, collects 0.10%
-
-    assert E.funding_entry_check(cs, 1e-6, -0.05) is not None   # adverse but covered
-    assert E.funding_entry_check(cs, 1e-6, -0.20) is None       # adverse and not covered
 
 
 def test_funding_exit_waits_for_convergence_instead_of_first_profit(eng, monkeypatch):
@@ -595,8 +567,8 @@ def test_funding_gate_refuses_to_trade_before_costs_are_known(eng):
     several times the funding they could ever collect."""
     cs = make_coin()
     set_funding(cs, 0.05, 600)
-    assert E.funding_entry_check(cs, 0.0, 0.0) is None     # no cost estimate yet
-    assert E.funding_entry_check(cs, 0.01, 0.0) is not None
+    assert E.funding_entry_check(cs, 0.0) is None     # no cost estimate yet
+    assert E.funding_entry_check(cs, 0.01) is not None
 
 
 def test_spread_is_not_charged_twice(eng, monkeypatch):
@@ -748,14 +720,14 @@ def test_skips_coins_whose_gap_outruns_the_funding(eng, monkeypatch):
     for i in range(40):
         cs.buckets.append({"spread_pct": 0.05 if i % 2 else -0.05})
     assert E.basis_volatility(cs) == pytest.approx(0.05, rel=0.1)
-    assert E.funding_entry_check(cs, 0.001, 0.0) is not None
+    assert E.funding_entry_check(cs, 0.001) is not None
 
     # Same funding, but this gap swings 0.30% routinely: the stop is well inside
     # the noise and would be taken out long before the stamp.
     cs.buckets.clear()
     for i in range(40):
         cs.buckets.append({"spread_pct": 0.30 if i % 2 else -0.30})
-    assert E.funding_entry_check(cs, 0.001, 0.0) is None
+    assert E.funding_entry_check(cs, 0.001) is None
 
 
 def test_volatility_does_not_wait_for_the_full_window(eng, monkeypatch):
@@ -778,10 +750,10 @@ def test_unmeasured_volatility_blocks_entry(eng, monkeypatch):
     cs = make_coin()
     set_funding(cs, 0.20, 600, calm=False)
     assert E.basis_volatility(cs) is None
-    assert E.funding_entry_check(cs, 0.001, 0.0) is None      # no history, no trade
+    assert E.funding_entry_check(cs, 0.001) is None      # no history, no trade
     for i in range(40):
         cs.buckets.append({"spread_pct": 0.01 if i % 2 else -0.01})
-    assert E.funding_entry_check(cs, 0.001, 0.0) is not None  # calm gap, fine
+    assert E.funding_entry_check(cs, 0.001) is not None  # calm gap, fine
 
 
 def test_open_position_exposes_what_the_panel_needs(eng, monkeypatch):
@@ -818,3 +790,58 @@ def test_a_widening_gap_reports_as_negative_progress(eng, monkeypatch):
                                         stamps_crossed=1)
     st, _, _ = build_state()
     assert st["coins"][0]["position"]["reverted_pct"] < 0
+
+
+def test_entry_is_decided_on_funding_alone(eng, monkeypatch):
+    """Convergence is upside we take when it appears, not a reason to enter, so
+    the gap sitting either way must not change whether we take the trade."""
+    monkeypatch.setattr(E, "MIN_FUNDING_PCT", 0.001)
+    monkeypatch.setattr(E, "EDGE_FRICTION_MULT", 1.0)
+    monkeypatch.setattr(E, "MIN_FUNDING_APR", 0.0)
+    cs = make_coin()
+    set_funding(cs, 0.10, 600)
+    d, rate, secs = E.funding_entry_check(cs, 0.001)
+    assert d == +1 and rate == pytest.approx(0.10)
+
+    # funding that cannot cover its own round trip is refused whatever the gap
+    assert E.funding_entry_check(cs, 0.20) is None
+
+
+def test_convergence_is_measured_against_spot_not_a_rolling_mean(eng, monkeypatch):
+    """Zero is the anchor: the perp is meant to track spot. That also means a
+    coin can trade as soon as it has a quote, with no eight minute warm-up."""
+    monkeypatch.setattr(E, "MIN_FUNDING_PCT", 0.001)
+    monkeypatch.setattr(E, "EDGE_FRICTION_MULT", 1.0)
+    monkeypatch.setattr(E, "MIN_FUNDING_APR", 0.0)
+    monkeypatch.setattr(E, "STRATEGY", "funding")
+    cs = make_coin(win=1000)                      # a window it cannot fill in time
+    feed(cs, lambda: -0.5, 12)                    # perp 0.5% below spot
+    E.run_bucket(cs)                              # gives us a cost estimate to gate on
+    # A gap that sits steadily at -0.5%: wide, but calm, so the stop is not
+    # inside the coin's own noise.
+    cs.buckets.clear()
+    for i in range(40):
+        cs.buckets.append({"spread_pct": -0.5 + (0.002 if i % 2 else -0.002)})
+    set_funding(cs, 0.10, 600, calm=False)
+    assert not cs.bucket_signal["ready"], "deliberately not warmed up"
+
+    E.check_entry_on_tick(cs, E.get_fill_snap(cs))
+    for _ in range(60):
+        if cs.open_position:
+            break
+        time.sleep(0.02)
+    pos = cs.open_position
+    assert pos is not None, "should trade without waiting for a rolling mean"
+    assert pos["entry_mean"] == 0.0                       # anchored to spot
+    assert pos["entry_deviation"] == pytest.approx(pos["entry_spread"])
+
+
+def test_trade_size_is_capped_whichever_sizer_wins(eng, monkeypatch):
+    """Sizing off the whole visible book put six figures into BTC and $15 into an
+    illiquid alt, so one coin's noise drowned out every other result."""
+    monkeypatch.setattr(E, "MAX_NOTIONAL_USD", 1000.0)
+    deep = {"spot_asks": [[100.0, 100000.0]], "spot_bids": [[99.9, 100000.0]],
+            "perp_asks": [[100.1, 100000.0]], "perp_bids": [[100.0, 100000.0]]}
+    assert E._funding_notional(deep, +1) == pytest.approx(1000.0)
+    size, _, _, _ = E.find_optimal_notional(deep, +1, 0.0, 0.0)
+    assert size <= 1000.0

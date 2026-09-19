@@ -33,7 +33,7 @@ python run.py --coins LSK,ONE,XTZ,SOL,SEI,WIF,TIA,ORDI
 
 | Command | What it does |
 |---|---|
-| `python run.py` | Live Binance data, all 72 coins → http://127.0.0.1:8001 |
+| `python run.py` | Live Binance data, all 172 coins → http://127.0.0.1:8001 |
 | `python run.py --coins LSK,ONE,XTZ` | Only those coins. |
 | `python compare.py` | **Four engines at once** — ZERO, VIP0, VIP5, VIP9 — on ports 8100-8103, each an independent book taking its own trades. One window per tier. |
 | `python run.py --demo` | Synthetic feed, no exchange connection. Labelled "Demo"; writes to `data/demo/`, never the real CSV. |
@@ -51,10 +51,10 @@ without it.
 | Gate | Rule |
 |---|---|
 | Funding is real | `\|rate\| ≥ MIN_FUNDING_PCT`, feed under 60 s old |
-| A payment is due soon | `0 < time_to_stamp ≤ FUNDING_ENTRY_WINDOW_SEC` |
+| A payment is due soon | within `FUNDING_ENTRY_WINDOW_FRAC` of that coin's own funding cycle |
 | Costs are known | `friction > 0`. Zero means *not measured yet*, not *free* |
 | The gap doesn't outrun the funding | `stop ÷ basis_volatility ≥ MIN_STOP_SIGMAS`. Unmeasured also blocks |
-| The edge beats friction by a margin | `funding + convergence ≥ EDGE_FRICTION_MULT × friction` |
+| The edge beats friction by a margin | `funding ≥ EDGE_FRICTION_MULT × friction`. Entry is decided on funding alone |
 | It's worth the capital | annualised return `≥ MIN_FUNDING_APR` |
 | Not still cooling off | `STOP_COOLDOWN_SEC` since the last stop on this coin |
 
@@ -62,8 +62,10 @@ Direction follows the sign: a positive rate means longs pay shorts, so we short 
 negative rate means the reverse. Either way we are on the receiving side, which is why the
 dashboard treats both as income rather than colouring negatives as a loss.
 
-Convergence is signed by our direction, so a gap sitting the wrong way counts *against* the
-edge. We still take the trade when that happens, as long as the funding covers it.
+Convergence is measured against **spot itself**, not a rolling average of past gaps: the perp
+is meant to track spot, so zero is the real anchor. That also means a coin can trade as soon
+as it has a quote and a volatility estimate, rather than waiting out an eight minute window.
+Convergence is upside we take when it appears, never a reason to enter.
 
 **Execution.** Both legs cross the book together, one millisecond after the signal, so a
 fill never lands on the tick that produced it and the pair is never half on. The fee is
@@ -111,7 +113,8 @@ refuse, because the fee alone exceeds the edge.
 | `EDGE_FRICTION_MULT` | `1.5` | Edge must beat friction by this multiple, not merely exceed it. |
 | `MIN_STOP_SIGMAS` | `2.0` | Skip coins whose gap routinely travels further than funding can pay for. |
 | `MIN_VOL_SAMPLES` | `30` | Buckets needed before that volatility can be judged. |
-| `FUNDING_ENTRY_WINDOW_SEC` | `3600` | Only enter this close to a payment. |
+| `FUNDING_ENTRY_WINDOW_FRAC` | `1.0` | Entry window as a fraction of each coin's own funding cycle. |
+| `FUNDING_ENTRY_WINDOW_SEC` | `28800` | Absolute ceiling on that window. |
 | `REVERSION_FRACTION` | `0.90` | How much of the gap we expect to close, and the exit trigger. |
 | `STOP_LOSS_FUNDING_MULT` | `2.0` | Stop distance as a multiple of the funding being collected. |
 | `STOP_LOSS_MIN_PCT` | `0.05` | Floor on that, for when funding is tiny. |
@@ -175,7 +178,5 @@ A coin missing from either leg is flagged **Not listed** at startup and never tr
 - Shorting spot is treated as costless. A real margin short pays a borrow fee.
 - Funding is credited from the live rate at the stamp, which can differ from the rate seen
   at entry. If it flips, the trade pays instead of collecting, and that is recorded as such.
-- The entry window is one fixed hour for every coin, but funding intervals are 1 h, 4 h or
-  8 h. So an hourly pair is eligible for its whole cycle while an 8 h pair is eligible for
-  an eighth of it. Expressing the window as a fraction of each coin's own interval would
-  make that even.
+- Trade size is capped per position, not against a shared pot of capital. Several positions
+  can be open at once with no portfolio-level limit on total exposure.

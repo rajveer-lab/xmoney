@@ -45,28 +45,45 @@ init(autoreset=True)
 # Small- and mid-cap, volatile pairs, the ones that actually carry funding.
 # Anything not listed on BOTH Binance spot and USDⓈ-M futures is detected at
 # startup by seed_books() and flagged "Not listed"; it simply never trades.
+# Every pair below is listed on BOTH Binance spot and USDⓈ-M perpetual futures,
+# checked against exchangeInfo on both venues. A coin missing from either leg is
+# flagged "Not listed" at startup and simply never trades, so the list is safe to
+# grow: the filters decide what is worth trading, not this list.
 COINS = [
-    # ── From the cross-exchange funding scan ─────────────────────────────────
-    # These were ranked on Bybit/OKX vs Binance, so several may be missing from
-    # Binance spot. Startup will tell you which ones drop out.
-    "XTZ", "LSK", "ONE", "AVA", "CAP", "SIREN", "VELVET", "KAT",
+    # ── Seed set: the cross-exchange funding scan plus hand-picked volatiles ──
+    "XTZ", "LSK", "ONE", "AVA", "CAP", "SIREN",
+    "VELVET", "KAT", "SOL", "AVAX", "LINK", "NEAR",
+    "SUI", "ADA", "DOGE", "SEI", "INJ", "TIA",
+    "OP", "ZK", "STX", "ATOM", "FLOW", "CFX",
+    "ASTR", "CELO", "IMX", "THETA", "ICP", "AR",
+    "CRV", "LDO", "DYDX", "PENDLE", "EIGEN", "MORPHO",
+    "API3", "COMP", "CAKE", "RENDER", "FET", "TAO",
+    "ONDO", "PYTH", "JUP", "JTO", "WLD", "RSR",
+    "BAND", "SKY", "WIF", "BOME", "PENGU", "NEIRO",
+    "HMSTR", "TRUMP", "ORDI", "ARKM", "BLUR", "KAITO",
+    "VIRTUAL", "GALA", "AXS", "SAND", "CHZ", "YGG",
+    "ALICE", "APE", "ENJ", "SFP", "BICO", "LPT",
 
-    # ── Majors: liquid anchors, tight books, funding flips often ─────────────
-    "SOL", "AVAX", "LINK", "NEAR", "SUI", "ADA", "DOGE",
-
-    # ── Mid-cap L1/L2 and DeFi ───────────────────────────────────────────────
-    "SEI", "INJ", "TIA", "OP", "ZK", "STX", "ATOM", "FLOW",
-    "CFX", "ASTR", "CELO", "IMX", "THETA", "ICP", "AR",
-
-    # ── DeFi / infra ─────────────────────────────────────────────────────────
-    "CRV", "LDO", "DYDX", "PENDLE", "EIGEN", "MORPHO", "API3",
-    "COMP", "CAKE", "RENDER", "FET", "TAO", "ONDO", "PYTH", "JUP",
-    "JTO", "WLD", "RSR", "BAND", "SKY",
-
-    # ── High-beta memes and new listings: widest funding swings ──────────────
-    "WIF", "BOME", "PENGU", "NEIRO", "HMSTR", "TRUMP", "ORDI",
-    "ARKM", "BLUR", "KAITO", "VIRTUAL", "GALA", "AXS", "SAND",
-    "CHZ", "YGG", "ALICE", "APE", "ENJ", "SFP", "BICO", "LPT",
+    # ── Widened to the rest of the liquid book, ranked by futures turnover ────
+    # Deeper books mean a trade can actually be sized; the entry gates still
+    # reject anything whose funding does not cover its own spread.
+    "ETH", "BTC", "ZEC", "XRP", "UNI", "ENA",
+    "G", "BNB", "FIL", "ZAMA", "ARB", "STRK",
+    "BCH", "APT", "AAVE", "F", "LTC", "PUMP",
+    "SYN", "XLM", "DASH", "ASTER", "牛来", "BANK",
+    "DOT", "MARSCOIN", "ZEN", "HBAR", "COTI", "TRX",
+    "ETC", "XPL", "POL", "HEI", "SAGA", "EPIC",
+    "AERO", "ETHFI", "C", "ESP", "VET", "ZRO",
+    "IOST", "STG", "WLFI", "CHIP", "GENIUS", "ALLO",
+    "PROM", "PAXG", "MINA", "ALGO", "BERA", "EGLD",
+    "VTHO", "GRAM", "RED", "MET", "ACE", "TUT",
+    "0G", "HOME", "HEMI", "S", "ROBO", "LA",
+    "SOPH", "MITO", "PEOPLE", "ONG", "CELR", "SOLV",
+    "SUSHI", "CVC", "ZIL", "GIGGLE", "JST", "RE",
+    "XAUT", "REZ", "ENS", "TREE", "SUPER", "DEXE",
+    "KAVA", "BIO", "ARK", "MANA", "NIL", "ACH",
+    "MMT", "T", "FF", "MEGA", "PROVE", "SKL",
+    "IOTA", "TRB", "CATI", "PNUT",
 ]
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -174,8 +191,15 @@ POST_RECONNECT_COOLDOWN_SEC = 10.0  # block new entries for N seconds after any 
 #           "funding" = delta-neutral funding capture only
 #           "both" = funding when a stamp is in range, spread otherwise
 STRATEGY                  = os.environ.get("STRATEGY", "funding").strip().lower()
-# Enter this far ahead of the funding stamp (funding pays to whoever holds AT the stamp)
-FUNDING_ENTRY_WINDOW_SEC  = float(os.environ.get("FUNDING_ENTRY_WINDOW_SEC", 3600.0))
+# How far ahead of a payment we will enter, as a fraction of that coin's own
+# funding cycle. A fixed number of minutes was wildly uneven: intervals here are
+# 1h, 4h and 8h, so one hour covered an hourly coin's entire cycle while
+# excluding a 4h coin for three quarters of its own, and it refused genuinely
+# good setups purely for settling later in the day. The APR gate already prices
+# the wait, so this only stops capital being parked a whole cycle early.
+FUNDING_ENTRY_WINDOW_FRAC = float(os.environ.get("FUNDING_ENTRY_WINDOW_FRAC", 1.0))
+# Absolute ceiling on top of that, for the rare very long interval
+FUNDING_ENTRY_WINDOW_SEC  = float(os.environ.get("FUNDING_ENTRY_WINDOW_SEC", 8 * 3600.0))
 # Minimum |funding rate| worth entering for, in percent per interval
 MIN_FUNDING_PCT           = float(os.environ.get("MIN_FUNDING_PCT", 0.0050))
 # Require expected edge to beat friction by this multiple (kills penny trades)
@@ -220,7 +244,10 @@ STREAM_TYPE        = os.environ.get("STREAM_TYPE", "bookTicker").strip()
 
 # ── Dynamic sizing ────────────────────────────────────────────────────────────
 MIN_NOTIONAL_USD   = 10.0        # never enter below this size
-MAX_NOTIONAL_USD   = float('inf')  # no cap — book-walk limited only by available liquidity
+# Cap per trade. Without one, sizing off the whole visible book put $213k into a
+# single BTC position while an illiquid alt got $15, so one coin's noise drowned
+# out every other result. A flat cap keeps positions comparable.
+MAX_NOTIONAL_USD   = float(os.environ.get("MAX_NOTIONAL_USD", 1000.0))
 NOTIONAL_STEPS     = 50          # increased steps for finer granularity across wider range
 DEPTH_STREAM_MS    = 100         # depth update rate if using depth stream: 100ms or 250ms
 
@@ -668,8 +695,8 @@ def find_optimal_notional(snap, direction, roll_mean, round_trip_pct):
     # Total liquidity available across up to 20 levels
     spot_total_usd = sum(p * q for p, q in spot_levels)
     perp_total_usd = sum(p * q for p, q in perp_levels)
-    # Cap at actual book liquidity on both sides — no artificial notional ceiling
-    max_available  = min(spot_total_usd, perp_total_usd)
+    # Bounded by what both sides can actually fill, and by the per-trade cap
+    max_available  = min(spot_total_usd, perp_total_usd, MAX_NOTIONAL_USD)
 
     if max_available < MIN_NOTIONAL_USD:
         return 0.0, None, None, 0.0
@@ -757,7 +784,8 @@ def _funding_notional(snap, direction):
     if not spot_levels or not perp_levels:
         return 0.0
     available = min(sum(p * q for p, q in spot_levels),
-                    sum(p * q for p, q in perp_levels))
+                    sum(p * q for p, q in perp_levels),
+                    MAX_NOTIONAL_USD)
     return available if available >= MIN_NOTIONAL_USD else 0.0
 
 def max_hold_for(pos):
@@ -1078,6 +1106,9 @@ def execute_entry(cs, direction, signal_spread, signal_deviation,
         # on many entries is zero, sizing off it would leave most of the
         # funding on the table.
         notional = max(notional, _funding_notional(snap, direction))
+    # Both sizing paths get capped here, so neither can slip a whole order book
+    # into one position.
+    notional = min(notional, MAX_NOTIONAL_USD)
 
     if notional <= 0:
         with cs.lock:
@@ -1297,21 +1328,14 @@ def execute_exit(cs, pos, exit_reason):
 # TICK-LEVEL GATE CHECK — entry
 # ══════════════════════════════════════════════════════════════════════════════
 
-def funding_entry_check(cs, round_trip, deviation):
+def funding_entry_check(cs, round_trip):
     """Is there a funding stamp worth holding into?
 
-    One trade, two earners: the funding payment at the stamp, and the basis
-    converging back to its mean while we hold. They normally point the same way
-, funding is positive exactly when the perp is rich, and the trade that
-    collects it is the one that profits as that richness decays.
+    Decided on the funding payment alone. Convergence is a second earner we take
+    whenever it turns up, not a reason to enter: the perp is meant to track spot,
+    so any gap closing is upside on top of a trade that already pays for itself.
 
-    `deviation` is the current spread minus its rolling mean. Reversion helps a
-    long-spot/short-perp book when the spread sits above its mean, and helps the
-    opposite book when it sits below, so signing it by direction turns it into an
-    edge that can be positive or negative. We still take the trade when it is
-    negative, as long as funding more than pays for it.
-
-    Returns (direction, funding_pct, secs_to_stamp, convergence_edge_pct) or None.
+    Returns (direction, funding_pct, secs_to_stamp) or None.
     """
     fv = funding_view(cs)
     if fv is None:
@@ -1319,54 +1343,50 @@ def funding_entry_check(cs, round_trip, deviation):
     rate_pct, secs_to_stamp, interval_h = fv
 
     # get_round_trip_pct() reports 0 until it has five bid-ask samples per leg.
-    # Funding entries skip the 500s rolling warm-up on purpose, so without this
-    # they also skip the point where cost becomes knowable, and a coin with a
-    # 0.16% spread reads as free, which clears every hurdle below trivially.
+    # Zero means not measured yet, not free, and a coin with a 0.16% spread
+    # reading as free clears every hurdle below trivially.
     if round_trip <= 0:
         return None
 
     if abs(rate_pct) < MIN_FUNDING_PCT:
         return None
-    if secs_to_stamp <= 0 or secs_to_stamp > FUNDING_ENTRY_WINDOW_SEC:
+    window = min(FUNDING_ENTRY_WINDOW_SEC,
+                 (interval_h or DEFAULT_FUNDING_INTERVAL_H) * 3600.0 * FUNDING_ENTRY_WINDOW_FRAC)
+    if secs_to_stamp <= 0 or secs_to_stamp > window:
         return None
 
     direction = +1 if rate_pct > 0 else -1
 
-    # Would this coin's ordinary movement knock us out before we get paid?
-    # The stop sits 2x the funding away. If that is inside one standard
-    # deviation of how far this gap normally travels, being stopped is the
-    # base case, not the exception, and the funding was never collectable.
+    # Would this coin's ordinary movement knock us out before we get paid? The
+    # stop sits 2x the funding away. If that is inside one standard deviation of
+    # how far this gap normally travels, being stopped is the base case rather
+    # than the exception, and the funding was never really collectable.
     vol = basis_volatility(cs)
     if vol is None or vol <= 0:
-        # Not enough history to know how far this gap travels. Unmeasured is not
-        # the same as safe, and this is the filter that keeps us out of coins
-        # whose ordinary movement dwarfs their funding, so wait rather than guess.
+        # Unmeasured is not the same as safe.
         return None
     stop_pct = max(STOP_LOSS_FUNDING_MULT * abs(rate_pct), STOP_LOSS_MIN_PCT)
     if (stop_pct / vol) < MIN_STOP_SIGMAS:
         return None
 
-    # Only part of a dislocation realistically reverts inside the hold.
-    convergence_edge = deviation * direction * REVERSION_FRACTION
-
-    total_expected = abs(rate_pct) + convergence_edge - round_trip
+    total_expected = abs(rate_pct) - round_trip
     if total_expected <= 0:
         return None
     # A multiple of friction, not merely above it: an edge that only just clears
     # costs sits inside the error of the cost estimate itself.
-    if (abs(rate_pct) + convergence_edge) < EDGE_FRICTION_MULT * round_trip:
+    if abs(rate_pct) < EDGE_FRICTION_MULT * round_trip:
         return None
 
     # Judged as a rate of return, not an absolute. Capital is committed until we
-    # exit, which is the stamp plus however long convergence takes afterwards, 
-    # not just the countdown, or a trade entered seconds before a stamp would
-    # look near-infinitely attractive.
+    # exit, which is the stamp plus however long the unwind takes, not just the
+    # countdown, or a trade entered seconds before a stamp would look
+    # near-infinitely attractive.
     hold_hours = max((secs_to_stamp + FUNDING_EXIT_GRACE_SEC / 2.0) / 3600.0, 1.0 / 60.0)
     apr        = total_expected * (8760.0 / hold_hours)
     if apr < MIN_FUNDING_APR:
         return None
 
-    return direction, rate_pct, secs_to_stamp, convergence_edge
+    return direction, rate_pct, secs_to_stamp
 
 def check_entry_on_tick(cs, snap):
     with cs.lock:
@@ -1398,13 +1418,15 @@ def check_entry_on_tick(cs, snap):
         perp_mid = _mid(snap, "perp")
         if spot_mid is not None and perp_mid is not None:
             spread_pct = (perp_mid - spot_mid) / spot_mid * 100
-            # No warm rolling window yet → no mean to revert to, so the trade is
-            # priced on funding alone rather than on an imagined convergence.
-            roll_mean  = bs["roll_mean"] if bs["ready"] else spread_pct
-            deviation  = spread_pct - roll_mean
-            fc = funding_entry_check(cs, round_trip, deviation)
+            # Convergence is measured against spot itself, not a rolling average
+            # of past gaps. The perp is meant to track spot, so zero is the real
+            # anchor, and using it lets a coin trade as soon as we have a quote
+            # instead of waiting out an eight minute window for a mean.
+            roll_mean  = 0.0
+            fc = funding_entry_check(cs, round_trip)
             if fc is not None:
-                direction, funding_pct, secs_to_stamp, convergence_edge = fc
+                direction, funding_pct, secs_to_stamp = fc
+                convergence_edge = spread_pct * direction * REVERSION_FRACTION
                 with cs.lock:
                     if cs.open_position is not None or cs.entry_pending:
                         return
