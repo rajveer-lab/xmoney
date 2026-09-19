@@ -166,9 +166,10 @@
     const warming = (sc.warming || 0) + (sc.connecting || 0);
     if (warming > 0) {
       const t = c.tiers.fast;
-      b.push(["info", "Warming up",
-        g.coins_ready + " of " + g.coins_total + " coins have a full rolling window. Each coin needs about " +
-        fmtDur(t.window * t.bucket_sec) + " of live data before it can trade."]);
+      b.push(["info", "Building the mean",
+        warming + " of " + g.coins_total + " coins are still building their rolling mean (about " +
+        fmtDur(t.window * t.bucket_sec) + "). Funding trades do not wait for it — only the " +
+        "convergence half of the edge is priced once the mean is there."]);
     }
     const down = (st.feeds || []).filter((f) => f.status !== "connected");
     if (down.length && st.uptime_sec > 15) {
@@ -226,7 +227,7 @@
     setText($("#k-ready-sub"), (sc.warming || 0) + (sc.connecting || 0) + " warming · " +
       ((sc.stale || 0) + (sc.offline || 0) + (sc.unlisted || 0)) + " no feed");
 
-    document.title = (g.closed ? fmtUsd(g.net_usd) + " · " : "") + "Spot-Perp Reversion";
+    document.title = (g.closed ? fmtUsd(g.net_usd) + " · " : "") + "xmoney — Funding Capture";
   }
 
   // ── open positions ────────────────────────────────────────────────────────
@@ -237,7 +238,7 @@
     host.textContent = "";
     if (!open.length) {
       host.appendChild(el("p", "empty", st.entries_enabled
-        ? "No open positions. Entries fire when a spread moves beyond the σ band and clears costs."
+        ? "No open positions. A trade opens when a funding payment is due soon and is worth more than the cost of getting in and out."
         : "No open positions. Entries are paused."));
       return;
     }
@@ -281,8 +282,12 @@
   const COLS = [
     { key: "symbol", label: "Coin", cls: "sym", val: (c) => c.symbol, str: true },
     { key: "state", label: "State", val: (c) => STATE_ORDER[c.state] ?? 9 },
-    { key: "spread", label: "Spread %", r: true, val: (c) => c.spread_pct },
-    { key: "z", label: "σ from mean", r: true, val: (c) => (isNum(c.z) ? Math.abs(c.z) : null) },
+    { key: "funding", label: "Funding %", r: true, val: (c) => c.funding_pct },
+    { key: "apr", label: "Funding APR", r: true, val: (c) => c.funding_apr },
+    { key: "stamp", label: "Pays in", r: true, val: (c) => c.funding_in_sec },
+    { key: "spread", label: "Basis %", r: true, val: (c) => c.spread_pct },
+    // the convergence half of the edge: how far the basis sits from its own mean
+    { key: "z", label: "Basis σ", r: true, val: (c) => (isNum(c.z) ? Math.abs(c.z) : null) },
     { key: "rt", label: "Friction %", r: true, val: (c) => c.rt_pct },
     { key: "signals", label: "Signals", r: true, val: (c) => c.signals },
     { key: "closed", label: "Trades", r: true, val: (c) => c.closed },
@@ -354,6 +359,19 @@
     } else if (c.state === "unlisted") {
       row.tr.title = "Not listed on Binance " + c.unlisted.join(" and ") + " — this coin can never trade.";
     }
+
+    // funding is the signal: the rate, what it annualises to, and the countdown
+    setText(k.funding, isNum(c.funding_pct) ? fmtPct(c.funding_pct, 4) : "–");
+    setCls(k.funding, "r num " + (isNum(c.funding_pct) ? signCls(c.funding_pct) : "dim"));
+    k.funding.title = isNum(c.funding_pct)
+      ? (c.funding_pct > 0 ? "Positive: longs pay shorts — we short the perp to receive"
+                           : "Negative: shorts pay longs — we long the perp to receive") +
+        (isNum(c.funding_ivl_h) ? "\nSettles every " + c.funding_ivl_h + "h" : "")
+      : "No funding data for this coin yet";
+    setText(k.apr, isNum(c.funding_apr) ? fmtNum(c.funding_apr, 0) + "%" : "–");
+    setCls(k.apr, "r num " + (isNum(c.funding_apr) ? signCls(c.funding_apr) : "dim"));
+    setText(k.stamp, isNum(c.funding_in_sec) ? fmtDur(c.funding_in_sec) : "–");
+    k.stamp.title = "Funding only pays whoever is holding at the settlement moment";
 
     setText(k.spread, fmtPct(c.spread_pct, 4));
     setText(row.zv, isNum(c.z) ? sign(c.z) + Math.abs(c.z).toFixed(2) : "–");

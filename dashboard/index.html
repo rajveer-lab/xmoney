@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Spot-Perp Reversion</title>
+  <title>xmoney — Funding Capture</title>
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
@@ -11,7 +11,7 @@
 
   <header class="topbar">
     <div class="brand">
-      <h1>Spot–Perp Reversion</h1>
+      <h1>xmoney — Funding Capture</h1>
       <span id="badge" class="badge" title="No real orders are placed">Paper</span>
     </div>
     <div class="topbar-right">
@@ -50,7 +50,7 @@
         <div id="k-deployed" class="sub num">–</div>
       </div>
       <div class="card tile">
-        <div class="label">Coins ready</div>
+        <div class="label">Funding tracked</div>
         <div id="k-ready" class="value num">0/0</div>
         <div id="k-ready-sub" class="sub num">–</div>
       </div>
@@ -104,6 +104,8 @@
           <input id="tq" type="search" placeholder="Search coin…" aria-label="Search trades by coin" autocomplete="off">
           <select id="texit" aria-label="Filter by exit type">
             <option value="">All exits</option>
+            <option value="funding">Funding + convergence</option>
+            <option value="stop-loss">Stop loss</option>
             <option value="reversion">Reversion</option>
             <option value="min-profit">Min-profit</option>
             <option value="timeout">Timeout</option>
