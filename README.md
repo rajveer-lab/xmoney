@@ -107,7 +107,7 @@ refuse, because the fee alone exceeds the edge.
 | `FEE_TIER` | `ZERO` | `ZERO` or `VIP0`–`VIP9`. |
 | `FILL_FEE_TYPE` | `maker` | Fee charged on every fill. `taker` for the conservative view. |
 | `MIN_FUNDING_PCT` | `0.0050` | Smallest rate worth entering for. |
-| `MIN_FUNDING_APR` | `20.0` | Minimum annualised return, at entry and at every stamp. |
+| `MIN_FUNDING_APR` | `12.0` | Minimum annualised return, at entry and at every stamp. |
 | `EDGE_FRICTION_MULT` | `1.5` | Edge must beat friction by this multiple, not merely exceed it. |
 | `MIN_STOP_SIGMAS` | `2.0` | Skip coins whose gap routinely travels further than funding can pay for. |
 | `MIN_VOL_SAMPLES` | `30` | Buckets needed before that volatility can be judged. |

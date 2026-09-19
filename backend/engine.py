@@ -181,7 +181,7 @@ MIN_FUNDING_PCT           = float(os.environ.get("MIN_FUNDING_PCT", 0.0050))
 # Require expected edge to beat friction by this multiple (kills penny trades)
 EDGE_FRICTION_MULT        = float(os.environ.get("EDGE_FRICTION_MULT", 1.5))
 # Minimum annualised return on capital for a funding trade to be worth the hold
-MIN_FUNDING_APR           = float(os.environ.get("MIN_FUNDING_APR", 20.0))
+MIN_FUNDING_APR           = float(os.environ.get("MIN_FUNDING_APR", 12.0))
 # Fallback only: how long to keep holding after a stamp when the funding feed has
 # gone quiet and we cannot re-evaluate. Normally the decision is remade at every
 # stamp instead of running down a clock.
