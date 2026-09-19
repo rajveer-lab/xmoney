@@ -51,7 +51,7 @@ init(autoreset=True)
 # tail: median 0.0100% against 0.0050%, with half of them clearing the risk
 # filters against a third of the rest. Widen it by passing --coins.
 COINS = [
-    "ETH", "BTC", "ZEC", "SOL", "XRP", "NEAR",
+    "ETH", "BTC", "SOL", "XRP", "NEAR",
     "UNI", "ONE", "DOGE", "ENA", "SUI", "G",
     "BNB", "AVAX", "FIL", "ADA", "AR", "ZAMA",
     "TAO", "ARB", "ONDO", "WLD", "LINK", "INJ",
@@ -81,7 +81,7 @@ BUCKET_TIERS = {
     "slow"   : (5.0,  max(5, ROLLING_WIN // 10)),     # slow     — <1 tick/s
 }
 # Coins that need wider buckets (identified by low tick rate in practice)
-MEDIUM_TIER = {"ZEC", "VIRTUAL", "HBAR", "PIXEL", "DOT", "JTO",
+MEDIUM_TIER = {"VIRTUAL", "HBAR", "PIXEL", "DOT", "JTO",
                "PENGU", "NEIRO", "ALLO", "RE", "MEGA", "SEI", "SAND"}
 SLOW_TIER   = {"PAXG", "XAUT", "USDC", "L"}
 
