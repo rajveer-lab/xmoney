@@ -661,3 +661,59 @@ def test_spread_is_not_charged_twice(eng, monkeypatch):
     _, net_a, _ = E.calc_pnl(pos, 100.0, 100.0, 0.0)
     _, net_b, _ = E.calc_pnl(pos, 100.0, 100.0, 0.5)
     assert net_a == pytest.approx(net_b) == pytest.approx(0.0)
+
+
+def make_funding_pos(**over):
+    pos = {
+        "direction": +1, "entry_spot_fill": 100.0, "entry_perp_fill": 100.0,
+        "notional_usd": 100.0, "entry_deviation": 0.0, "entry_mean": 0.0,
+        "entry_time": time.time(), "best_pnl": -999.0, "best_pnl_usd": -999.0,
+        "trade_kind": "funding", "funding_collected_pct": 0.0, "stamps_crossed": 0,
+        "entry_spot_fill_type": "taker", "entry_perp_fill_type": "taker",
+        "profit_target_hit": False, "action": "LONG spot / SHORT perp",
+        "entry_dt": "x", "secs_to_funding": 600.0, "stop_loss_pct": 0.06,
+        "entry_mark_pct": 0.0,
+    }
+    pos.update(over)
+    return pos
+
+
+def test_stop_measures_from_entry_not_from_zero(eng, monkeypatch):
+    """A pair opens already down one round trip of spread: that is the cost of
+    unwinding, not a loss. Measuring the stop against raw net fired the instant a
+    position opened on any coin whose spread was wider than the stop, which is how
+    the engine took the same losing trade hundreds of times in a row."""
+    monkeypatch.setattr(E, "MAKER_FIRST", False)
+    cs = make_coin()
+    E.process_spot_tick(cs, book(100.0))
+    E.process_perp_tick(cs, book(100.0))
+
+    # Wide spread: the trade is 0.12% underwater purely from entry+exit cost,
+    # twice the 0.06% stop. It must NOT stop on that alone.
+    cs.open_position = make_funding_pos(entry_mark_pct=-0.12)
+    E.check_exit_on_tick(cs, E.get_fill_snap(cs))
+    assert not cs.exit_pending
+
+    # Only once it moves a further 0.06% against the entry mark does it stop.
+    cs.open_position = make_funding_pos(entry_mark_pct=0.20)
+    E.check_exit_on_tick(cs, E.get_fill_snap(cs))
+    assert cs.exit_pending
+
+
+def test_a_stop_blocks_re_entry_for_the_cooldown(eng, monkeypatch):
+    monkeypatch.setattr(E, "STRATEGY", "funding")   # fixture defaults to spread
+    monkeypatch.setattr(E, "STOP_COOLDOWN_SEC", 120.0)
+    monkeypatch.setattr(E, "MIN_FUNDING_PCT", 0.001)
+    monkeypatch.setattr(E, "EDGE_FRICTION_MULT", 1.0)
+    monkeypatch.setattr(E, "MIN_FUNDING_APR", 0.0)
+    cs = make_coin()
+    warm_up(cs)
+    set_funding(cs, 0.20, 600)
+
+    cs.last_stop_time = time.time()
+    E.check_entry_on_tick(cs, E.get_fill_snap(cs))
+    assert cs.open_position is None and not cs.entry_pending   # still cooling off
+
+    cs.last_stop_time = time.time() - 121
+    E.check_entry_on_tick(cs, E.get_fill_snap(cs))
+    assert cs.open_position is not None or cs.entry_pending    # free to trade again

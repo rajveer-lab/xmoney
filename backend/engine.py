@@ -185,6 +185,9 @@ DEFAULT_FUNDING_INTERVAL_H = 8.0
 STOP_LOSS_FUNDING_MULT    = float(os.environ.get("STOP_LOSS_FUNDING_MULT", 2.0))
 # Floor for the stop, for the case where funding is tiny
 STOP_LOSS_MIN_PCT         = float(os.environ.get("STOP_LOSS_MIN_PCT", 0.05))
+# After a stop, wait before re-entering the same coin. Without this the engine
+# reopens the identical setup on the very next tick and loops on it.
+STOP_COOLDOWN_SEC         = float(os.environ.get("STOP_COOLDOWN_SEC", 120.0))
 # Below this, an entry deviation is noise and "convergence" is not a meaningful exit
 MIN_CONVERGENCE_DEV_PCT   = float(os.environ.get("MIN_CONVERGENCE_DEV_PCT", 0.005))
 
@@ -579,6 +582,8 @@ class CoinState:
         # Timestamp of the most recent reconnect (spot or perp) — used to block
         # new entries for POST_RECONNECT_COOLDOWN_SEC after any stream comes back
         self.last_reconnect_time  = None
+        # when this coin was last stopped out, for the re-entry cooldown
+        self.last_stop_time       = None
 
         # csv_path removed — all trades written to single master CSV
 
@@ -1134,10 +1139,22 @@ def execute_entry(cs, direction, signal_spread, signal_deviation,
                                         STOP_LOSS_MIN_PCT),
             "funding_collected_pct": 0.0,
             "stamps_crossed"      : 0,
+            "entry_mark_pct"      : 0.0,   # set just below
             "next_funding_ms"     : (None if secs_to_funding is None
                                      else int((now + secs_to_funding) * 1000)),
         }
         cs.entry_pending = False
+
+    # A freshly opened pair is already down by the cost of unwinding it: we crossed
+    # the spread to get in and would cross it again to get out. That is the trade's
+    # starting line, not a loss. Recording it lets the stop measure real adverse
+    # movement instead of firing on the entry cost the instant we open.
+    exit_spot_now, exit_perp_now = get_exit_vwap(get_fill_snap(cs), direction, notional)
+    if exit_spot_now is not None and exit_perp_now is not None:
+        with cs.lock:
+            if cs.open_position is not None:
+                _, mark, _ = calc_pnl(cs.open_position, exit_spot_now, exit_perp_now, round_trip_pct)
+                cs.open_position["entry_mark_pct"] = mark
 
     # ── Gate 3 slip buffer: combined latency + book-walk slippage ────────────
     # Gate 3 buffer = 90th percentile of (dev_shrink + book_slip) across past trades.
@@ -1356,6 +1373,14 @@ def check_entry_on_tick(cs, snap):
     if last_recon is not None and (time.time() - last_recon) < POST_RECONNECT_COOLDOWN_SEC:
         return
 
+    # A stop means this setup just went against us. Re-entering it on the next
+    # tick is how the engine ends up taking the same losing trade hundreds of
+    # times, so sit the cooldown out and let the situation change first.
+    with cs.lock:
+        last_stop = cs.last_stop_time
+    if last_stop is not None and (time.time() - last_stop) < STOP_COOLDOWN_SEC:
+        return
+
     # ── Funding capture ──────────────────────────────────────────────────────
     # Checked ahead of the spread gates and without waiting for the rolling
     # window: the edge here is the funding payment, not the z-score.
@@ -1487,14 +1512,21 @@ def check_exit_on_tick(cs, snap):
         # Stop loss runs before and after the stamp. If the basis has moved
         # against us by more than the funding was ever going to pay, the reason
         # for holding is gone, waiting for the stamp would only add to it.
-        if net <= -stop_pct:
+        #
+        # Measured from where the trade started, not from zero. Every pair opens
+        # already down by one round trip of spread, so comparing raw net against
+        # the stop fired the instant we opened on any coin whose spread was wider
+        # than the stop, then reopened and fired again on the next tick.
+        baseline = pos.get("entry_mark_pct", 0.0)
+        if (net - baseline) <= -stop_pct:
             with cs.lock:
                 if cs.open_position is None or cs.exit_pending:
                     return
                 cs.exit_pending = True
+                cs.last_stop_time = time.time()
                 pos_snap = cs.open_position
-            reason = (f"STOP LOSS  net={net:+.5f}% <= -{stop_pct:.5f}%  "
-                      f"funding={collected:+.5f}%  "
+            reason = (f"STOP LOSS  moved {net - baseline:+.5f}% against us "
+                      f"(limit -{stop_pct:.5f}%)  funding={collected:+.5f}%  "
                       f"dev:{pos['entry_deviation']:+.5f}%→{curr_deviation:+.5f}%")
             threading.Thread(target=execute_exit, args=(cs, pos_snap, reason),
                              daemon=True).start()
