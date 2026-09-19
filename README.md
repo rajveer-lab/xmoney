@@ -28,12 +28,12 @@ xmoney/
 
 ```bash
 pip install -r requirements.txt
-python run.py --coins LSK,ONE,XTZ,SOL,SEI,WIF,TIA,ORDI
+python run.py            # top 50 by turnover, both legs verified
 ```
 
 | Command | What it does |
 |---|---|
-| `python run.py` | Live Binance data, all 172 coins → http://127.0.0.1:8001 |
+| `python run.py` | Live Binance data, the top 50 pairs by turnover → http://127.0.0.1:8001 |
 | `python run.py --coins LSK,ONE,XTZ` | Only those coins. |
 | `python compare.py` | **Four engines at once** — ZERO, VIP0, VIP5, VIP9 — on ports 8100-8103, each an independent book taking its own trades. One window per tier. |
 | `python run.py --demo` | Synthetic feed, no exchange connection. Labelled "Demo"; writes to `data/demo/`, never the real CSV. |
@@ -191,3 +191,5 @@ A coin missing from either leg is flagged **Not listed** at startup and never tr
   at entry. If it flips, the trade pays instead of collecting, and that is recorded as such.
 - Trade size is capped per position, not against a shared pot of capital. Several positions
   can be open at once with no portfolio-level limit on total exposure.
+- The coin list is the top 50 by turnover, fixed at the time it was generated. Turnover
+  rankings drift, so it is a snapshot rather than a live screen.
