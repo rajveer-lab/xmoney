@@ -722,3 +722,43 @@ def test_both_legs_fill_together_at_the_book(eng, monkeypatch):
     monkeypatch.setattr(E, "FILL_FEE_TYPE", "taker")
     _, _, sf, pf, _ = E.execute_two_leg_fill(cs, +1, 100.0, "exit", allow_cancel=False)
     assert (sf, pf) == ("taker", "taker")
+
+
+def test_skips_coins_whose_gap_outruns_the_funding(eng, monkeypatch):
+    """A stop sitting inside the coin's ordinary noise will be hit before the
+    payment arrives, so that funding was never really collectable."""
+    monkeypatch.setattr(E, "MIN_FUNDING_PCT", 0.001)
+    monkeypatch.setattr(E, "EDGE_FRICTION_MULT", 1.0)
+    monkeypatch.setattr(E, "MIN_FUNDING_APR", 0.0)
+    monkeypatch.setattr(E, "MIN_STOP_SIGMAS", 2.0)
+    monkeypatch.setattr(E, "STOP_LOSS_FUNDING_MULT", 2.0)
+    monkeypatch.setattr(E, "STOP_LOSS_MIN_PCT", 0.0)
+    monkeypatch.setattr(E, "MIN_VOL_SAMPLES", 5)
+
+    cs = make_coin()
+    set_funding(cs, 0.10, 600)          # stop lands 0.20% away
+
+    # Calm gap: 0.20% is 4 standard deviations out, so being stopped is unlikely.
+    cs.buckets.clear()
+    for i in range(40):
+        cs.buckets.append({"spread_pct": 0.05 if i % 2 else -0.05})
+    assert E.basis_volatility(cs) == pytest.approx(0.05, rel=0.1)
+    assert E.funding_entry_check(cs, 0.001, 0.0) is not None
+
+    # Same funding, but this gap swings 0.30% routinely: the stop is well inside
+    # the noise and would be taken out long before the stamp.
+    cs.buckets.clear()
+    for i in range(40):
+        cs.buckets.append({"spread_pct": 0.30 if i % 2 else -0.30})
+    assert E.funding_entry_check(cs, 0.001, 0.0) is None
+
+
+def test_volatility_does_not_wait_for_the_full_window(eng, monkeypatch):
+    """A risk filter that only switches on after eight minutes is not a filter."""
+    monkeypatch.setattr(E, "MIN_VOL_SAMPLES", 30)
+    cs = make_coin(win=1000)
+    for i in range(29):
+        cs.buckets.append({"spread_pct": 0.1 if i % 2 else -0.1})
+    assert E.basis_volatility(cs) is None        # not enough to judge yet
+    cs.buckets.append({"spread_pct": 0.1})
+    assert E.basis_volatility(cs) is not None    # usable well before 1000 buckets

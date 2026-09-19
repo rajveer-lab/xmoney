@@ -201,6 +201,15 @@ STOP_LOSS_MIN_PCT         = float(os.environ.get("STOP_LOSS_MIN_PCT", 0.05))
 STOP_COOLDOWN_SEC         = float(os.environ.get("STOP_COOLDOWN_SEC", 120.0))
 # Below this, an entry deviation is noise and "convergence" is not a meaningful exit
 MIN_CONVERGENCE_DEV_PCT   = float(os.environ.get("MIN_CONVERGENCE_DEV_PCT", 0.005))
+# Skip coins whose gap routinely travels further than funding could ever pay for.
+# The stop sits at 2x the funding we are waiting to collect, so if that distance
+# is only a fraction of how far this gap normally moves, the stop is inside the
+# coin's ordinary noise and will be hit before the payment arrives. Expressed in
+# standard deviations of the coin's own basis: the stop must be at least this
+# many away to be worth entering at all.
+MIN_STOP_SIGMAS           = float(os.environ.get("MIN_STOP_SIGMAS", 2.0))
+# Enough buckets to estimate that volatility without waiting for the full window
+MIN_VOL_SAMPLES           = int(os.environ.get("MIN_VOL_SAMPLES", 30))
 
 # Latency simulation: 1ms by default so a fill never lands on the signal tick itself
 ENTRY_DELAY_SEC    = float(os.environ.get("ENTRY_DELAY_SEC", 0.001))
@@ -857,6 +866,20 @@ def get_round_trip_pct(cs):
     pm  = float(np.mean(pba)) if len(pba) >= 5 else 0.0
     return sm + pm + round_trip_fee_pct()
 
+def basis_volatility(cs):
+    """How far this coin's gap normally travels, in percent.
+
+    Deliberately does not wait for the full rolling window the way
+    get_rolling_stats does: a risk filter that only switches on after eight
+    minutes is not a risk filter. Anything past MIN_VOL_SAMPLES buckets gives a
+    usable estimate.
+    """
+    b = list(cs.buckets)
+    if len(b) < MIN_VOL_SAMPLES:
+        return None
+    spreads = [x["spread_pct"] for x in b[-cs.rolling_win:]]
+    return float(np.std(spreads, ddof=1))
+
 def get_rolling_stats(cs):
     if len(cs.buckets) < cs.rolling_win:
         return None, None
@@ -1315,6 +1338,16 @@ def funding_entry_check(cs, round_trip, deviation):
         return None
 
     direction = +1 if rate_pct > 0 else -1
+
+    # Would this coin's ordinary movement knock us out before we get paid?
+    # The stop sits 2x the funding away. If that is inside one standard
+    # deviation of how far this gap normally travels, being stopped is the
+    # base case, not the exception, and the funding was never collectable.
+    vol = basis_volatility(cs)
+    if vol is not None and vol > 0:
+        stop_pct = max(STOP_LOSS_FUNDING_MULT * abs(rate_pct), STOP_LOSS_MIN_PCT)
+        if (stop_pct / vol) < MIN_STOP_SIGMAS:
+            return None
 
     # Only part of a dislocation realistically reverts inside the hold.
     convergence_edge = deviation * direction * REVERSION_FRACTION

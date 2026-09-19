@@ -50,7 +50,14 @@ def _coin_row(cs, now, feed_of):
         n_slips   = len(cs.slip_history)
         last_rec  = cs.last_reconnect_time
     n_buckets = len(cs.buckets)
-    fv = E.funding_view(cs)          # (rate_pct, secs_to_stamp, interval_h) or None
+    fv  = E.funding_view(cs)         # (rate_pct, secs_to_stamp, interval_h) or None
+    vol = E.basis_volatility(cs)     # how far this coin's gap normally travels
+    # How many of this coin's own standard deviations the stop sits away. Under
+    # MIN_STOP_SIGMAS the gap routinely travels further than funding can pay for.
+    stop_sigmas = None
+    if fv and vol and vol > 0:
+        _stop = max(E.STOP_LOSS_FUNDING_MULT * abs(fv[0]), E.STOP_LOSS_MIN_PCT)
+        stop_sigmas = _stop / vol
 
     spread, sm, pm = _spread_pct(latest)
     ready = bool(bs["ready"])
@@ -158,6 +165,8 @@ def _coin_row(cs, now, feed_of):
         "funding_apr"   : _f(fv[0] * (24.0 / fv[2]) * 365.0, 1) if fv else None,
         "funding_in_sec": _f(max(0.0, fv[1]), 0) if fv else None,
         "funding_ivl_h" : fv[2] if fv else None,
+        "basis_vol_pct" : _f(vol),
+        "stop_sigmas"   : _f(stop_sigmas, 2),
         "ws_spot"       : s_status,
         "ws_perp"       : p_status,
         "feed_spot"     : s_feed,
@@ -261,6 +270,7 @@ def build_state(prev_updates=None, prev_ts=None):
             "fee_rt_maker"       : _f(E.round_trip_fee_pct("maker"), 5),
             "fee_rt_taker"       : _f(E.round_trip_fee_pct("taker"), 5),
             "fill_fee_type"      : E.FILL_FEE_TYPE,
+            "min_stop_sigmas"    : E.MIN_STOP_SIGMAS,
             "min_funding_pct"    : E.MIN_FUNDING_PCT,
             "min_funding_apr"    : E.MIN_FUNDING_APR,
             "edge_friction_mult" : E.EDGE_FRICTION_MULT,

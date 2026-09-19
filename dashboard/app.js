@@ -288,6 +288,8 @@
     { key: "spread", label: "Basis %", r: true, val: (c) => c.spread_pct },
     // the convergence half of the edge: how far the basis sits from its own mean
     { key: "z", label: "Basis σ", r: true, val: (c) => (isNum(c.z) ? Math.abs(c.z) : null) },
+    // Under the threshold the gap routinely moves further than funding can pay for.
+    { key: "safety", label: "Stop σ", r: true, val: (c) => c.stop_sigmas },
     { key: "rt", label: "Friction %", r: true, val: (c) => c.rt_pct },
     { key: "signals", label: "Signals", r: true, val: (c) => c.signals },
     { key: "closed", label: "Trades", r: true, val: (c) => c.closed },
@@ -361,15 +363,19 @@
     }
 
     // funding is the signal: the rate, what it annualises to, and the countdown
+    // Sign says which side pays, not whether it is good for us: we always take
+    // the side that receives, so a negative rate is income exactly like a
+    // positive one. Colour by whether it is worth collecting, not by sign.
+    const payable = isNum(c.funding_pct) && Math.abs(c.funding_pct) >= (S.state?.config?.min_funding_pct ?? 0);
     setText(k.funding, isNum(c.funding_pct) ? fmtPct(c.funding_pct, 4) : "–");
-    setCls(k.funding, "r num " + (isNum(c.funding_pct) ? signCls(c.funding_pct) : "dim"));
+    setCls(k.funding, "r num " + (!isNum(c.funding_pct) ? "dim" : payable ? "pos" : ""));
     k.funding.title = isNum(c.funding_pct)
       ? (c.funding_pct > 0 ? "Positive: longs pay shorts, so we short the perp to receive"
                            : "Negative: shorts pay longs, so we long the perp to receive") +
         (isNum(c.funding_ivl_h) ? "\nSettles every " + c.funding_ivl_h + "h" : "")
       : "No funding data for this coin yet";
-    setText(k.apr, isNum(c.funding_apr) ? fmtNum(c.funding_apr, 0) + "%" : "–");
-    setCls(k.apr, "r num " + (isNum(c.funding_apr) ? signCls(c.funding_apr) : "dim"));
+    setText(k.apr, isNum(c.funding_apr) ? fmtNum(Math.abs(c.funding_apr), 0) + "%" : "–");
+    setCls(k.apr, "r num " + (!isNum(c.funding_apr) ? "dim" : payable ? "pos" : ""));
     setText(k.stamp, isNum(c.funding_in_sec) ? fmtDur(c.funding_in_sec) : "–");
     k.stamp.title = "Funding only pays whoever is holding at the settlement moment";
 
@@ -385,6 +391,16 @@
     } else {
       row.mk.style.display = "none";
     }
+    const minSig = S.state?.config?.min_stop_sigmas ?? 2;
+    setText(k.safety, isNum(c.stop_sigmas) ? c.stop_sigmas.toFixed(2) + "σ" : "–");
+    setCls(k.safety, "r num " + (!isNum(c.stop_sigmas) ? "dim"
+                                 : c.stop_sigmas >= minSig ? "pos" : "neg"));
+    k.safety.title = isNum(c.stop_sigmas)
+      ? "The stop sits " + c.stop_sigmas.toFixed(2) + " standard deviations from where we would enter.\n" +
+        "Under " + minSig + " this gap normally travels further than the funding could pay for, so we skip it." +
+        (isNum(c.basis_vol_pct) ? "\nGap moves about " + fmtPct(c.basis_vol_pct, 4, false) + " on a typical swing." : "")
+      : "Not enough history yet to measure how far this gap normally moves.";
+
     setText(k.rt, isNum(c.rt_pct) && c.rt_pct > 0 ? fmtPct(c.rt_pct, 4, false) : "–");
     setText(k.signals, fmtInt(c.signals));
     k.signals.title = "Detected " + c.signals + " · blocked by cost gate " + c.blocked_g2 +
