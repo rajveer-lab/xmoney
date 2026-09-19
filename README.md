@@ -33,7 +33,7 @@ python run.py --coins LSK,ONE,XTZ,SOL,SEI,WIF,TIA,ORDI
 
 | Command | What it does |
 |---|---|
-| `python run.py` | Live Binance data, all 72 coins → http://127.0.0.1:8000 |
+| `python run.py` | Live Binance data, all 72 coins → http://127.0.0.1:8001 |
 | `python run.py --coins LSK,ONE,XTZ` | Only those coins. |
 | `python compare.py` | **Four engines at once** — ZERO, VIP0, VIP5, VIP9 — on ports 8100-8103, each an independent book taking its own trades. One window per tier. |
 | `python run.py --demo` | Synthetic feed, no exchange connection. Labelled "Demo"; writes to `data/demo/`, never the real CSV. |
