@@ -1069,3 +1069,39 @@ def test_a_profit_thinner_than_one_lurch_is_not_worth_banking(eng, monkeypatch):
     set_funding(cs, 0.0001, 600, calm=False)
     E.check_exit_on_tick(cs, E.get_fill_snap(cs))
     assert not cs.exit_pending
+
+
+def test_converged_exit_needs_a_margin_not_a_bare_zero(eng, monkeypatch):
+    """Deciding on one tick and filling on a later one makes a zero-width
+    threshold a losing bet: the exit fires on the first upward crossing of a
+    noisy series, so the deciding draw is a favourable tail while the filling
+    draw is unconditioned. Expected value at a bare zero is negative."""
+    monkeypatch.setattr(E, "MIN_CONVERGENCE_JUMPS", 0.0)
+    monkeypatch.setattr(E, "MIN_CONVERGENCE_DEV_PCT", 0.0)
+    monkeypatch.setattr(E, "MIN_VOL_SAMPLES", 10)
+    monkeypatch.setattr(E, "MIN_NET_PCT", 0.001)
+    cs = make_coin()
+    for i in range(40):                          # lurches ~0.04% a tick
+        cs.buckets.append({"spread_pct": 0.02 if i % 2 else -0.02})
+    E.process_spot_tick(cs, book(100.0))
+    E.process_perp_tick(cs, book(100.0))
+    lurch = E.basis_jump_pct(cs)
+    assert lurch > 0.01
+
+    # past the stamp, gap fully converged, but barely in profit: a gain thinner
+    # than one lurch will not survive to the fill, so it must not fire
+    thin = make_funding_pos(direction=+1, entry_deviation=0.50, entry_mean=0.0,
+                            stamps_crossed=1, stop_loss_pct=5.0, entry_mark_pct=0.0,
+                            entry_spot_fill=99.9995, entry_perp_fill=100.0005)
+    cs.open_position = thin
+    E.check_exit_on_tick(cs, E.get_fill_snap(cs))
+    assert not cs.exit_pending
+
+    # comfortably clear of the noise: now it is worth taking
+    cs.exit_pending = False
+    cs.open_position = make_funding_pos(direction=+1, entry_deviation=0.50,
+                                        entry_mean=0.0, stamps_crossed=1,
+                                        stop_loss_pct=5.0, entry_mark_pct=0.0,
+                                        entry_spot_fill=99.8, entry_perp_fill=100.2)
+    E.check_exit_on_tick(cs, E.get_fill_snap(cs))
+    assert cs.exit_pending

@@ -1648,14 +1648,26 @@ def check_exit_on_tick(cs, snap):
         # distance from zero: a short perp profits as the gap falls, a long perp
         # as it rises. Measuring |gap| shrinking treated a gap running our way as
         # though it were going wrong, so a profitable position read "gap widened".
+        # The number that fires an exit and the number that gets realised are two
+        # different draws: we decide on this tick's book and fill on a later one.
+        # Because this runs on every tick, a zero-width threshold fires on the
+        # first upward crossing of a noisy series, so the deciding draw is a
+        # favourable tail while the filling draw is unconditioned. Expected value
+        # at a bare zero is therefore negative, not even. The margin has to be at
+        # least one ordinary lurch, which is the size of that re-draw.
+        exit_margin = max(MIN_NET_PCT, lurch or 0.0)
+
         if not conv_meaningful or not conv_open:
             # The gap is either jitter or on the wrong side, so there is no
-            # convergence to collect: leave as soon as we are in the black.
-            converged = net >= 0
+            # convergence to collect: leave once we are clear of the noise.
+            converged = net >= exit_margin
         else:
             converged = moved_our_way >= abs_entry_dev * REVERSION_FRACTION
 
-        if converged:
+        # Even a real convergence has to be worth banking. This branch used to
+        # fire on the gap alone with no reference to money at all, so it could
+        # hand back more than the funding it had waited an entire interval for.
+        if converged and net >= exit_margin:
             with cs.lock:
                 if cs.open_position is None or cs.exit_pending:
                     return
