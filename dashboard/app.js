@@ -586,8 +586,20 @@
       cell(SIDE[t.direction] || "–").title = t.action;
       cell(fmtUsd(t.notional_usd, false), "r num");
       cell(fmtDur(t.hold_sec), "r num");
-      cell(fmtPct(t.gross_pnl_pct), "r num " + signCls(t.gross_pnl_pct));
-      cell(fmtPct(t.net_pnl_pct), "r num " + signCls(t.net_pnl_pct));
+      // Gross is a component, not a verdict. It is negative on almost every
+      // trade by design, because both legs cross the spread going in and coming
+      // out. Colouring it red made winning rows look like losing ones, so it is
+      // left neutral and the funding that bridges it to net sits beside it.
+      const gc = cell(fmtPct(t.gross_pnl_pct), "r num dim");
+      gc.title = "Price move between our entry and exit fills, including the spread " +
+                 "we crossed both ways. Usually negative: it is a cost, not the result.";
+      const fc = cell(fmtPct(t.funding_collected_pct), "r num " +
+                      ((t.funding_collected_pct || 0) > 0 ? "pos" : "dim"));
+      fc.title = (t.stamps_crossed || 0) + " funding payment(s) collected while holding";
+      cell(fmtPct(t.net_pnl_pct), "r num " + signCls(t.net_pnl_pct))
+        .title = "gross " + fmtPct(t.gross_pnl_pct) + "  +  funding " +
+                 fmtPct(t.funding_collected_pct) + "  \u2212  fees " +
+                 fmtPct(t.realised_fee_pct || 0, 4, false) + "  =  " + fmtPct(t.net_pnl_pct);
       cell(fmtUsd(t.net_pnl_usd), "r num " + signCls(t.net_pnl_usd));
       cell(t.exit_type).title = t.exit_reason;
       cell(fmtPct(t.book_walk_slip_pct, 4, false), "r num");

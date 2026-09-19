@@ -1028,7 +1028,6 @@ MASTER_CSV_FIELDS = [
     "trade_kind",               # "spread" or "funding"
     "entry_spot_fill_type", "entry_perp_fill_type",
     "exit_spot_fill_type",  "exit_perp_fill_type",
-    "maker_legs",               # 0-4, how many of the four rested rather than crossed
     "fee_tier", "realised_fee_pct",
     # ── funding ──────────────────────────────────────────────────────────────
     "funding_pct_at_entry",     # rate seen when we entered
@@ -1236,11 +1235,9 @@ def execute_exit(cs, pos, exit_reason):
         "trade_kind"          : pos.get("trade_kind", "spread"),
         "funding_collected_pct": round(pos.get("funding_collected_pct", 0.0), 6),
         "stamps_crossed"      : pos.get("stamps_crossed", 0),
-        "maker_legs"          : sum(1 for t in (pos.get("entry_spot_fill_type"),
-                                                pos.get("entry_perp_fill_type"),
-                                                exit_spot_type, exit_perp_type)
-                                    if t == "maker"),
+        "realised_fee_pct"    : round(realised_fee_pct(pos, exit_spot_type, exit_perp_type), 6),
         "fee_tier"            : FEE_TIER,
+        "fill_fee_type"       : FILL_FEE_TYPE,
     })
 
     print()
@@ -1278,10 +1275,6 @@ def execute_exit(cs, pos, exit_reason):
         "entry_perp_fill_type" : pos.get("entry_perp_fill_type", "taker"),
         "exit_spot_fill_type"  : exit_spot_type,
         "exit_perp_fill_type"  : exit_perp_type,
-        "maker_legs"           : sum(1 for t in (pos.get("entry_spot_fill_type"),
-                                                 pos.get("entry_perp_fill_type"),
-                                                 exit_spot_type, exit_perp_type)
-                                     if t == "maker"),
         "fee_tier"             : FEE_TIER,
         "realised_fee_pct"     : round(realised_fee_pct(pos, exit_spot_type, exit_perp_type), 8),
         # ── funding ───────────────────────────────────────────────────────────
