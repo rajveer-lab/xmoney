@@ -672,7 +672,8 @@ def make_funding_pos(**over):
         "entry_spot_fill_type": "taker", "entry_perp_fill_type": "taker",
         "profit_target_hit": False, "action": "LONG spot / SHORT perp",
         "entry_dt": "x", "secs_to_funding": 600.0, "stop_loss_pct": 0.06,
-        "entry_mark_pct": 0.0,
+        "entry_mark_pct": 0.0, "entry_spread": 0.0, "signal_spread": 0.0,
+        "signal_deviation": 0.0, "dev_shrink_pct": 0.0, "entry_slip_pct": 0.0,
     }
     pos.update(over)
     return pos
@@ -717,3 +718,42 @@ def test_a_stop_blocks_re_entry_for_the_cooldown(eng, monkeypatch):
     cs.last_stop_time = time.time() - 121
     E.check_entry_on_tick(cs, E.get_fill_snap(cs))
     assert cs.open_position is not None or cs.entry_pending    # free to trade again
+
+
+def test_holding_past_a_stamp_is_decided_on_value_not_a_clock(eng, monkeypatch):
+    """Once a payment is banked and the gap has not closed, staying should depend
+    on whether the money still to be made beats the hurdle over the time it takes,
+    not on a fixed grace window expiring."""
+    monkeypatch.setattr(E, "MAKER_FIRST", False)
+    monkeypatch.setattr(E, "MIN_FUNDING_APR", 20.0)
+    monkeypatch.setattr(E, "REVERSION_FRACTION", 0.9)
+    cs = make_coin()
+    E.process_spot_tick(cs, book(100.0))
+    E.process_perp_tick(cs, book(100.0))
+    # Books are level, so entry_mean -0.50 leaves the gap still 0.50 wide:
+    # convergence has NOT fired and the hold decision is what runs.
+    held = dict(entry_deviation=0.50, entry_mean=-0.50, stamps_crossed=1,
+                funding_collected_pct=0.05, stop_loss_pct=5.0, entry_mark_pct=0.0)
+
+    # A fat next payment 10 minutes away, gap still in our favour: keep sitting.
+    cs.open_position = make_funding_pos(**held)
+    set_funding(cs, 0.20, 600)
+    E.check_exit_on_tick(cs, E.get_fill_snap(cs))
+    assert not cs.exit_pending
+
+    # Now the rate pays the other side and the gap sits against us, so there is
+    # nothing left worth waiting for: leave, even though no clock has run out.
+    cs.exit_pending = False
+    cs.open_position = make_funding_pos(**dict(held, direction=-1,
+                                               action="SHORT spot / LONG perp"))
+    set_funding(cs, -0.20, 600)
+    E.check_exit_on_tick(cs, E.get_fill_snap(cs))
+    assert cs.exit_pending
+    assert E._exit_type("NOT WORTH HOLDING next pays -0.2%") == "not-worth-holding"
+
+
+def test_funding_hold_ceiling_is_a_safety_net_not_the_strategy(eng):
+    """The old 15 minute grace was closing positions that were still working."""
+    short_stamp = {"trade_kind": "funding", "secs_to_funding": 120.0}
+    assert E.max_hold_for(short_stamp) >= E.FUNDING_MAX_HOLD_SEC
+    assert E.max_hold_for({"trade_kind": "spread"}) == E.MAX_HOLD_SEC

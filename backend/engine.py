@@ -176,8 +176,13 @@ MIN_FUNDING_PCT           = float(os.environ.get("MIN_FUNDING_PCT", 0.0050))
 EDGE_FRICTION_MULT        = float(os.environ.get("EDGE_FRICTION_MULT", 1.5))
 # Minimum annualised return on capital for a funding trade to be worth the hold
 MIN_FUNDING_APR           = float(os.environ.get("MIN_FUNDING_APR", 20.0))
-# How long after the stamp we keep trying to exit on convergence before timing out
+# Fallback only: how long to keep holding after a stamp when the funding feed has
+# gone quiet and we cannot re-evaluate. Normally the decision is remade at every
+# stamp instead of running down a clock.
 FUNDING_EXIT_GRACE_SEC    = float(os.environ.get("FUNDING_EXIT_GRACE_SEC", 900.0))
+# Safety ceiling on a funding hold. Not a strategy parameter: it only catches a
+# position that has somehow stopped being re-evaluated.
+FUNDING_MAX_HOLD_SEC      = float(os.environ.get("FUNDING_MAX_HOLD_SEC", 6 * 3600.0))
 DEFAULT_FUNDING_INTERVAL_H = 8.0
 # Stop loss, expressed as a multiple of the funding we entered to collect, so it
 # scales with the trade: rates across these pairs span two orders of magnitude,
@@ -265,6 +270,7 @@ def _exit_type(reason):
     if r.startswith("WATCHDOG"):   return "watchdog"
     if r.startswith("STOP LOSS"):  return "stop-loss"
     if r.startswith("FUNDING"):    return "funding"
+    if r.startswith("NOT WORTH"): return "not-worth-holding"
     return "other"
 
 def record_trade_event(ev):
@@ -740,12 +746,14 @@ def _funding_notional(snap, direction):
     return available if available >= MIN_NOTIONAL_USD else 0.0
 
 def max_hold_for(pos):
-    """Funding trades have to survive until their stamp, so the 180s spread
-    timeout can't apply to them, give them the countdown plus a grace window
-    to exit on convergence afterwards."""
+    """The 180s spread timeout cannot apply to a funding trade: it has to outlive
+    its own countdown. Past that, holding is decided at each stamp on whether the
+    next payment is still worth the capital, so this is only a safety ceiling."""
     if pos.get("trade_kind") != "funding":
         return MAX_HOLD_SEC
-    return max(MAX_HOLD_SEC, (pos.get("secs_to_funding") or 0.0) + FUNDING_EXIT_GRACE_SEC)
+    return max(MAX_HOLD_SEC,
+               (pos.get("secs_to_funding") or 0.0) + FUNDING_EXIT_GRACE_SEC,
+               FUNDING_MAX_HOLD_SEC)
 
 def accrue_funding(cs):
     """Credit (or debit) funding whenever a stamp passes while we're holding.
@@ -767,6 +775,7 @@ def accrue_funding(cs):
         received = rate_pct if pos["direction"] == +1 else -rate_pct
         pos["funding_collected_pct"] += received
         pos["stamps_crossed"]        += 1
+        pos["last_stamp_time"]        = time.time()
         interval_h = cs.funding_interval_h or DEFAULT_FUNDING_INTERVAL_H
         pos["next_funding_ms"] = nxt + interval_h * 3600 * 1000.0
         sym, total = cs.symbol, pos["funding_collected_pct"]
@@ -1560,6 +1569,47 @@ def check_exit_on_tick(cs, snap):
                       f"net={net:+.5f}%")
             threading.Thread(target=execute_exit, args=(cs, pos_snap, reason),
                              daemon=True).start()
+            return
+
+        # ── Still holding, gap not closed. Sit for the next payment or leave? ──
+        # A clock is the wrong test. What matters is whether the money still to be
+        # made from here beats the hurdle over the time it would take to make it,
+        # the same question asked at entry. Staying also means collecting again:
+        # an hourly pair pays every hour we hold it.
+        fv = funding_view(cs)
+        if fv is None:
+            # Funding feed is quiet, so the call can't be made. Fall back to the
+            # grace window rather than holding an un-evaluated position forever.
+            since = pos.get("last_stamp_time") or pos["entry_time"]
+            if (time.time() - since) <= FUNDING_EXIT_GRACE_SEC:
+                return
+            forward_edge, forward_apr, secs_next = 0.0, 0.0, None
+            why = "no funding data to re-evaluate"
+        else:
+            next_rate_pct, secs_next, _interval_h = fv
+            # Signed by our side: a rate that flipped means we now pay, not collect.
+            next_payment = next_rate_pct if pos["direction"] == +1 else -next_rate_pct
+            # Convergence still on the table, signed the same way.
+            conv_left    = curr_deviation * pos["direction"] * REVERSION_FRACTION
+            forward_edge = next_payment + conv_left
+            hold_h       = max((secs_next or 0.0) / 3600.0, 1.0 / 60.0)
+            forward_apr  = forward_edge * (8760.0 / hold_h)
+            if forward_edge > 0 and forward_apr >= MIN_FUNDING_APR:
+                return                      # worth staying for the next one
+            why = (f"next pays {next_payment:+.5f}%, convergence left "
+                   f"{conv_left:+.5f}%, forward {forward_apr:+.0f}% APR "
+                   f"< {MIN_FUNDING_APR:.0f}%")
+
+        with cs.lock:
+            if cs.open_position is None or cs.exit_pending:
+                return
+            cs.exit_pending = True
+            pos_snap = cs.open_position
+        reason = (f"NOT WORTH HOLDING  {why}  "
+                  f"funding={collected:+.5f}% over {pos.get('stamps_crossed', 0)} stamp(s)  "
+                  f"net={net:+.5f}%")
+        threading.Thread(target=execute_exit, args=(cs, pos_snap, reason),
+                         daemon=True).start()
         return
 
     # Reversion target: exit when REVERSION_FRACTION of entry deviation is gone
