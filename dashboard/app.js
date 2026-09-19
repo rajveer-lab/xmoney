@@ -254,20 +254,45 @@
       top.appendChild(el("span", "pos-pnl num " + signCls(p.net_usd), fmtUsd(p.net_usd)));
       item.appendChild(top);
 
+      // A negative "reverted" means the gap grew instead of closing, which is the
+      // trade going wrong. Clamping that to an empty bar made it look identical
+      // to a position that had only just opened, so widening gets its own
+      // direction and colour.
+      const rev = isNum(p.reverted_pct) ? p.reverted_pct : 0;
+      const widening = rev < 0;
       const meter = el("div", "meter");
       meter.setAttribute("role", "img");
-      meter.setAttribute("aria-label", "Deviation reverted " + fmtNum(p.reverted_pct, 0) + " percent, target " + target.toFixed(0));
-      const fill = el("i");
-      fill.style.width = Math.max(0, Math.min(100, p.reverted_pct || 0)) + "%";
+      meter.setAttribute("aria-label", widening
+        ? "Gap widened " + fmtNum(-rev, 0) + " percent beyond where we entered"
+        : "Gap closed " + fmtNum(rev, 0) + " percent of the " + target.toFixed(0) + " percent target");
+      const fill = el("i", widening ? "bad" : "");
+      fill.style.width = Math.min(100, Math.abs(rev)) + "%";
       const mark = el("b");
       mark.style.left = "calc(" + Math.min(100, target) + "% - 1px)";
       meter.appendChild(fill);
       meter.appendChild(mark);
       item.appendChild(meter);
 
-      item.appendChild(el("div", "pos-meta num",
-        "Reverted " + fmtNum(p.reverted_pct, 0) + "% of " + target.toFixed(0) + "% · net " + fmtPct(p.net_pct) +
-        " · held " + fmtDur(p.hold_sec) + " / " + fmtDur(p.max_hold_sec) + " · " + fmtUsd(p.notional_usd, false)));
+      // What actually matters while holding: how the gap is doing, what funding
+      // has landed, and when the next payment is due. The old line showed hold
+      // time against the six hour safety ceiling, which reads as a deadline it
+      // is not.
+      const meta = el("div", "pos-meta num");
+      const bit = (txt, cls) => meta.appendChild(el("span", cls || "", txt));
+      bit(widening ? "Gap widened " + fmtNum(-rev, 0) + "%"
+                   : "Gap closed " + fmtNum(rev, 0) + "% of " + target.toFixed(0) + "%",
+          widening ? "neg" : "");
+      bit(" · net ");
+      bit(fmtPct(p.net_pct), signCls(p.net_pct));
+      const stamps = p.stamps_crossed || 0;
+      bit(" · ");
+      bit(stamps
+            ? stamps + " payment" + (stamps > 1 ? "s" : "") + " " + fmtPct(p.funding_collected_pct)
+            : "no payment yet",
+          stamps ? "pos" : "");
+      if (isNum(p.secs_to_stamp)) bit(" · next in " + fmtDur(p.secs_to_stamp));
+      bit(" · held " + fmtDur(p.hold_sec) + " · " + fmtUsd(p.notional_usd, false));
+      item.appendChild(meta);
       host.appendChild(item);
     }
   }

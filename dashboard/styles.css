@@ -319,3 +319,6 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-siz
   border: 1px solid var(--border); background: var(--surface); color: var(--ink);
 }
 .fee-live { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+/* a position whose gap is widening rather than closing */
+.meter > i.bad { background: var(--bad); }

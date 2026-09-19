@@ -782,3 +782,39 @@ def test_unmeasured_volatility_blocks_entry(eng, monkeypatch):
     for i in range(40):
         cs.buckets.append({"spread_pct": 0.01 if i % 2 else -0.01})
     assert E.funding_entry_check(cs, 0.001, 0.0) is not None  # calm gap, fine
+
+
+def test_open_position_exposes_what_the_panel_needs(eng, monkeypatch):
+    """The positions panel shows funding collected, the next payment and whether
+    the gap is closing or widening. All of it has to survive into the snapshot."""
+    cs = make_coin()
+    monkeypatch.setattr(E, "ALL_CS", [cs])
+    E.process_spot_tick(cs, book(100.0))
+    E.process_perp_tick(cs, book(100.0))
+    cs.open_position = make_funding_pos(
+        entry_deviation=0.40, entry_mean=0.0, stamps_crossed=2,
+        funding_collected_pct=0.08,
+        next_funding_ms=(time.time() + 300) * 1000)
+
+    st, _, _ = build_state()
+    p = st["coins"][0]["position"]
+    assert p["trade_kind"] == "funding"
+    assert p["stamps_crossed"] == 2
+    assert p["funding_collected_pct"] == pytest.approx(0.08)
+    assert 290 <= p["secs_to_stamp"] <= 300
+    assert p["reverted_pct"] is not None      # drives the meter, can be negative
+    json.dumps(st, allow_nan=False)           # the broadcaster refuses NaN
+
+
+def test_a_widening_gap_reports_as_negative_progress(eng, monkeypatch):
+    """Negative reverted means the gap grew instead of closing. The panel keys off
+    that sign to colour the meter, so it must not be clamped away here."""
+    cs = make_coin()
+    monkeypatch.setattr(E, "ALL_CS", [cs])
+    E.process_spot_tick(cs, book(100.0))
+    E.process_perp_tick(cs, book(100.0))
+    # entered on a 0.10% gap; the current gap is 0.50% and so four times wider
+    cs.open_position = make_funding_pos(entry_deviation=0.10, entry_mean=-0.50,
+                                        stamps_crossed=1)
+    st, _, _ = build_state()
+    assert st["coins"][0]["position"]["reverted_pct"] < 0
