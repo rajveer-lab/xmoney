@@ -168,7 +168,7 @@
       const t = c.tiers.fast;
       b.push(["info", "Building the mean",
         warming + " of " + g.coins_total + " coins are still building their rolling mean (about " +
-        fmtDur(t.window * t.bucket_sec) + "). Funding trades do not wait for it — only the " +
+        fmtDur(t.window * t.bucket_sec) + "). Funding trades do not wait for it; only the " +
         "convergence half of the edge is priced once the mean is there."]);
     }
     const down = (st.feeds || []).filter((f) => f.status !== "connected");
@@ -227,7 +227,7 @@
     setText($("#k-ready-sub"), (sc.warming || 0) + (sc.connecting || 0) + " warming · " +
       ((sc.stale || 0) + (sc.offline || 0) + (sc.unlisted || 0)) + " no feed");
 
-    document.title = (g.closed ? fmtUsd(g.net_usd) + " · " : "") + "xmoney — Funding Capture";
+    document.title = (g.closed ? fmtUsd(g.net_usd) + " · " : "") + "xmoney Funding Capture";
   }
 
   // ── open positions ────────────────────────────────────────────────────────
@@ -364,8 +364,8 @@
     setText(k.funding, isNum(c.funding_pct) ? fmtPct(c.funding_pct, 4) : "–");
     setCls(k.funding, "r num " + (isNum(c.funding_pct) ? signCls(c.funding_pct) : "dim"));
     k.funding.title = isNum(c.funding_pct)
-      ? (c.funding_pct > 0 ? "Positive: longs pay shorts — we short the perp to receive"
-                           : "Negative: shorts pay longs — we long the perp to receive") +
+      ? (c.funding_pct > 0 ? "Positive: longs pay shorts, so we short the perp to receive"
+                           : "Negative: shorts pay longs, so we long the perp to receive") +
         (isNum(c.funding_ivl_h) ? "\nSettles every " + c.funding_ivl_h + "h" : "")
       : "No funding data for this coin yet";
     setText(k.apr, isNum(c.funding_apr) ? fmtNum(c.funding_apr, 0) + "%" : "–");
@@ -778,11 +778,11 @@
     {
       key: "find", tag: "1", title: "Find a coin that pays you to wait",
       body: "A perpetual is a copy of the real coin that never expires. To keep its price glued to the real one, " +
-            "the exchange makes one side pay the other every few hours. That payment is called funding — and it is " +
+            "the exchange makes one side pay the other every few hours. That payment is called funding, and it is " +
             "published in advance, so we can see exactly what we would be paid before risking anything.",
       points: [
         "We watch 72 small and mid-cap coins, where these payments are biggest.",
-        "Some settle every 8 hours, some every 4, a couple every hour — the faster ones pay more often.",
+        "Some settle every 8 hours, some every 4, a couple every hour. The faster ones pay more often.",
         "We only act when the payment is at least 1.5× what it costs us to trade.",
       ],
     },
@@ -790,21 +790,21 @@
       key: "enter", tag: "2", title: "Buy one side, sell the other, same moment",
       body: "We buy the real coin and sell the perpetual at the same time, in equal size. Now the price can do " +
             "whatever it likes: if it halves, one side loses exactly what the other side makes. We are not betting " +
-            "on the coin going up or down — we have no opinion at all.",
+            "on the coin going up or down. We have no opinion at all.",
       points: [
-        "Equal size, opposite directions — the price risk cancels out.",
+        "Equal size, opposite directions: the price risk cancels out.",
         "We try to sit patiently at the best price first; if nobody trades with us in 200ms, we pay up and cross.",
         "If only one side fills we immediately complete the other, so we are never left exposed.",
       ],
     },
     {
       key: "collect", tag: "3", title: "Hold through the payment and collect",
-      body: "Funding only pays whoever is holding at the exact settlement second — not a minute before, not after. " +
+      body: "Funding only pays whoever is holding at the exact settlement second: not a minute before, not after. " +
             "So once we are in, we sit still and wait for that moment. This is the first of our two paychecks.",
       points: [
         "Nothing closes the position before the payment, because the payment is the whole point.",
         "We enter close to the settlement time so our money isn't tied up longer than it needs to be.",
-        "If the rate flips against us before it settles, we record that honestly as a cost — not a profit.",
+        "If the rate flips against us before it settles, we record that honestly as a cost rather than a profit.",
       ],
     },
     {
@@ -843,7 +843,7 @@
     const line = (sel) => STRAT_PTS.map((p, i) => (i ? "L" : "M") + p.x + " " + sel(p)).join(" ");
     const spotY = (p) => p.spot, perpY = (p) => p.spot + p.gap;
 
-    // the gap between the two prices — this is what we earn as it narrows
+    // the gap between the two prices, this is what we earn as it narrows
     const band = STRAT_PTS.map((p) => p.x + " " + spotY(p)).join(" L ") + " L " +
                  [...STRAT_PTS].reverse().map((p) => p.x + " " + perpY(p)).join(" L ");
     const dim = (on) => (on ? "1" : "0.28");
@@ -861,7 +861,7 @@
       return t;
     };
     label(20, 46, "Real coin (spot)", "strat-t-spot");
-    label(20, 290, "Perpetual — trading cheaper here", "strat-t-perp");
+    label(20, 290, "Perpetual, trading cheaper here", "strat-t-perp");
 
     // price crashes mid-chart and both legs fall together: that is the whole point
     const crash = STRAT_PTS[3];
@@ -871,7 +871,7 @@
     const mk = svg("marker", { id: "strat-ar", viewBox: "0 0 10 10", refX: "8", refY: "5",
                                markerWidth: "6", markerHeight: "6", orient: "auto" }, defs);
     svg("path", { d: "M 0 0 L 10 5 L 0 10 z", class: "strat-arrow-head" }, mk);
-    label(crash.x + 8, spotY(crash) - 30, "price crashes — we don't care", "strat-t-muted");
+    label(crash.x + 8, spotY(crash) - 30, "price crashes, we don't care", "strat-t-muted");
 
     // funding settlement
     const stamp = STRAT_PTS[STRAT_STAMP];
@@ -939,7 +939,7 @@
     drawStrategyChart(st.key);
   }
 
-  // live fee-tier switch — the whole point is showing it still works with real fees
+  // live fee-tier switch, the whole point is showing it still works with real fees
   function renderFeeTier(stt) {
     const sel = $("#fee-tier");
     const c = stt.config;
@@ -968,7 +968,7 @@
     }
     if (document.activeElement !== sel) sel.value = c.fee_tier;
     $("#fee-live").textContent =
-      "round trip — maker " + fmtNum(c.fee_rt_maker, 4) + "% · taker " + fmtNum(c.fee_rt_taker, 4) + "%";
+      "round trip: maker " + fmtNum(c.fee_rt_maker, 4) + "% · taker " + fmtNum(c.fee_rt_taker, 4) + "%";
   }
 
   // ── boot ──────────────────────────────────────────────────────────────────

@@ -104,7 +104,7 @@ def create_app(bc: Broadcaster) -> Flask:
 
     @app.post("/api/control/fee_tier")
     def control_fee_tier():
-        """Swap the fee tier live — every gate, fill and PnL picks it up on the
+        """Swap the fee tier live. Every gate, fill and PnL picks it up on the
         next tick, so profitability can be shown at ZERO through VIP9 without a
         restart."""
         origin = request.headers.get("Origin")

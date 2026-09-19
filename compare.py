@@ -28,7 +28,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 
 GRID_HTML = """<!doctype html>
 <meta charset="utf-8">
-<title>xmoney — same strategy, different fee tiers</title>
+<title>xmoney: same strategy, different fee tiers</title>
 <style>
   :root {{ color-scheme: dark; }}
   * {{ box-sizing: border-box; }}
@@ -73,7 +73,7 @@ def tier_cost(tier):
         return "unknown tier"
     sm, st, pm, pt = E.FEE_TIERS[tier]
     if st == 0 and pt == 0:
-        return "spread only — no fees"
+        return "spread only, no fees"
     return f"round trip {2 * (st + pt):.3f}% taker · {2 * (sm + pm):.3f}% maker"
 
 
@@ -144,7 +144,7 @@ def main():
     print("  Each coin still needs its warm-up before it can trade. Ctrl+C stops everything.\n")
 
     if not args.no_open:
-        # A window per tier is the reliable view — some browsers refuse to frame
+        # A window per tier is the reliable view, some browsers refuse to frame
         # localhost pages at all, which leaves the grid blank with no error.
         def open_windows():
             for port in ports:
@@ -172,7 +172,7 @@ def main():
         time.sleep(1)
         for tier, p in zip(tiers, procs):
             if p.poll() is not None:
-                print(f"  ⚠️  {tier} engine exited (code {p.returncode}) — see compare_{tier.lower()}.log")
+                print(f"  ⚠️  {tier} engine exited (code {p.returncode}), see compare_{tier.lower()}.log")
                 procs.remove(p)
                 tiers.remove(tier)
                 break

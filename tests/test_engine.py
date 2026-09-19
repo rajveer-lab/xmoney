@@ -461,7 +461,7 @@ def test_funding_gate_direction_and_thresholds(eng, monkeypatch):
     # Too small to bother with.
     set_funding(cs, 0.001, 600)
     assert E.funding_entry_check(cs, friction, 0.0) is None
-    # Clears the absolute floor but not the multiple of friction — a penny trade.
+    # Clears the absolute floor but not the multiple of friction, a penny trade.
     set_funding(cs, 0.012, 600)
     assert E.funding_entry_check(cs, friction, 0.0) is None
     # Good rate, but the stamp is outside the entry window.
@@ -524,7 +524,7 @@ def test_funding_is_carried_into_pnl(eng, monkeypatch):
 
 
 def test_funding_position_holds_through_the_stamp_then_exits(eng, monkeypatch):
-    """Nothing closes before the stamp — the payment is the whole trade."""
+    """Nothing closes before the stamp, the payment is the whole trade."""
     monkeypatch.setattr(E, "MAKER_FIRST", False)
     cs = make_coin()
     E.process_spot_tick(cs, book(100.0))
@@ -573,7 +573,7 @@ def test_convergence_is_priced_into_the_funding_entry(eng, monkeypatch):
 
 def test_adverse_convergence_is_taken_when_funding_still_pays_for_it(eng, monkeypatch):
     """Option (b): an adverse basis doesn't veto the trade, it just has to be
-    outweighed — but it does veto it once it outweighs the funding."""
+    outweighed, but it does veto it once it outweighs the funding."""
     monkeypatch.setattr(E, "MIN_FUNDING_PCT", 0.001)
     monkeypatch.setattr(E, "EDGE_FRICTION_MULT", 1.0)
     monkeypatch.setattr(E, "MIN_FUNDING_APR", 0.0)
@@ -613,7 +613,7 @@ def test_funding_exit_waits_for_convergence_instead_of_first_profit(eng, monkeyp
 
 def test_funding_stop_loss_fires_before_the_stamp(eng, monkeypatch):
     """A basis that blows through the funding we were going to collect ends the
-    trade — waiting for the stamp would only add to the loss."""
+    trade, waiting for the stamp would only add to the loss."""
     monkeypatch.setattr(E, "MAKER_FIRST", False)
     cs = make_coin()
     E.process_spot_tick(cs, book(100.0))
@@ -642,7 +642,7 @@ def test_stop_loss_scales_with_the_funding_being_collected(eng, monkeypatch):
 
 def test_funding_gate_refuses_to_trade_before_costs_are_known(eng):
     """get_round_trip_pct() reports 0 until it has bid-ask samples. Zero is
-    'unknown', not 'free' — entering against it opened trades whose spread was
+    'unknown', not 'free', entering against it opened trades whose spread was
     several times the funding they could ever collect."""
     cs = make_coin()
     set_funding(cs, 0.05, 600)

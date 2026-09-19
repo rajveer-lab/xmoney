@@ -42,7 +42,7 @@ init(autoreset=True)
 # COIN LIST — 47 coins (29 original + 18 from scanner screenshots)
 # ══════════════════════════════════════════════════════════════════════════════
 
-# Small- and mid-cap, volatile pairs — the ones that actually carry funding.
+# Small- and mid-cap, volatile pairs, the ones that actually carry funding.
 # Anything not listed on BOTH Binance spot and USDⓈ-M futures is detected at
 # startup by seed_books() and flagged "Not listed"; it simply never trades.
 COINS = [
@@ -144,7 +144,7 @@ def round_trip_fee_pct(fill_type=None):
     ft = fill_type or ("maker" if FEE_GATE_MODE == "maker" else "taker")
     return 2 * (leg_fee_pct("spot", ft) + leg_fee_pct("perp", ft))
 
-# Kept for display only — the live number comes from round_trip_fee_pct().
+# Kept for display only, the live number comes from round_trip_fee_pct().
 EXCHANGE_FEE_PCT   = round_trip_fee_pct()
 
 # ── Maker-first execution ─────────────────────────────────────────────────────
@@ -366,7 +366,7 @@ def check_feeds(now, prev_msgs):
         if f["last_msg"] is None:
             continue
         if not f.get("quotes", True):
-            continue          # funding feed carries no order book — nothing to freshen
+            continue          # funding feed carries no order book, nothing to freshen
         # every message up to last_msg has been handled, in order, so a coin whose quote came
         # in on this connection session and hasn't changed since is still current as of last_msg
         ts_key, tick_attr, since, fresh = f"{f['leg']}_ts", f"{f['leg']}_last_tick", f["opened_at"], f["last_msg"]
@@ -392,13 +392,13 @@ def feed_monitor():
             print(f"{Fore.RED}[feed-monitor] {type(e).__name__}: {e}{Style.RESET_ALL}")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# FUNDING FEED — one connection carries the funding rate + next stamp for every
+# FUNDING FEED, one connection carries the funding rate + next stamp for every
 # symbol on USDⓈ-M futures (!markPrice@arr). Funding pays to whoever holds the
 # position AT the stamp, so both the rate and its countdown drive entry timing.
 # ══════════════════════════════════════════════════════════════════════════════
 
 # Funding comes over REST, not WebSocket. The documented !markPrice@arr stream
-# opens cleanly here but never delivers a frame — verified against a bookTicker
+# opens cleanly here but never delivers a frame, verified against a bookTicker
 # control on the same socket (2280 messages vs 0 in six seconds), including when
 # both are subscribed together. premiumIndex returns the rate and the next stamp
 # for every symbol in a single unauthenticated call, so one poll covers the book.
@@ -407,14 +407,14 @@ FUNDING_INFO_URL = "https://fapi.binance.com/fapi/v1/fundingInfo"
 FUNDING_POLL_SEC = float(os.environ.get("FUNDING_POLL_SEC", 5.0))
 
 def fetch_funding_intervals(all_cs):
-    """Most pairs settle every 8h, but many volatile ones run 4h — which doubles
+    """Most pairs settle every 8h, but many volatile ones run 4h, which doubles
     how often they pay. fundingInfo only lists symbols with non-default settings,
     so default to 8h and override whatever it returns."""
     by_symbol = {f"{cs.symbol.upper()}USDT": cs for cs in all_cs}
     try:
         rows = _rest_get(FUNDING_INFO_URL)
     except Exception as e:
-        print(f"{Fore.YELLOW}⚠️  fundingInfo fetch failed ({e}) — assuming {DEFAULT_FUNDING_INTERVAL_H:.0f}h "
+        print(f"{Fore.YELLOW}⚠️  fundingInfo fetch failed ({e}), assuming {DEFAULT_FUNDING_INTERVAL_H:.0f}h "
               f"for every pair{Style.RESET_ALL}")
         return
     adjusted = []
@@ -500,7 +500,7 @@ def funding_view(cs):
         rate, nxt, ts, interval = cs.funding_rate, cs.next_funding_ms, cs.funding_ts, cs.funding_interval_h
     if rate is None or nxt is None or ts is None:
         return None
-    if time.time() - ts > 60:          # funding feed has gone quiet — don't trust it
+    if time.time() - ts > 60:          # funding feed has gone quiet, don't trust it
         return None
     return rate * 100.0, (nxt / 1000.0 - time.time()), interval
 
@@ -723,7 +723,7 @@ def get_exit_vwap(snap, direction, notional):
 def _funding_notional(snap, direction):
     """Size a funding trade to everything both legs can actually fill.
     Funding pays on notional, so the spread doesn't have to be profitable on its
-    own — take all the liquidity that's there."""
+    own, take all the liquidity that's there."""
     if direction == +1:
         spot_levels, perp_levels = snap["spot_asks"], snap["perp_bids"]
     else:
@@ -736,7 +736,7 @@ def _funding_notional(snap, direction):
 
 def max_hold_for(pos):
     """Funding trades have to survive until their stamp, so the 180s spread
-    timeout can't apply to them — give them the countdown plus a grace window
+    timeout can't apply to them, give them the countdown plus a grace window
     to exit on convergence afterwards."""
     if pos.get("trade_kind") != "funding":
         return MAX_HOLD_SEC
@@ -745,7 +745,7 @@ def max_hold_for(pos):
 def accrue_funding(cs):
     """Credit (or debit) funding whenever a stamp passes while we're holding.
 
-    We enter to *receive*, but the rate can flip before it settles — so sign it
+    We enter to *receive*, but the rate can flip before it settles, so sign it
     off the live rate rather than assuming we always collect.
       direction +1 (short perp) receives when the rate is positive
       direction -1 (long perp)  receives when the rate is negative
@@ -838,7 +838,7 @@ def execute_two_leg_fill(cs, direction, notional, phase, allow_cancel=True):
 
         # One leg resting while the other is live = naked delta. Either cross the
         # laggard straight away (default) or walk away from the whole trade.
-        # An exit can never be abandoned — flattening always crosses the laggard.
+        # An exit can never be abandoned, flattening always crosses the laggard.
         if allow_cancel and LEG_RISK_POLICY == "cancel" and (spot_maker != perp_maker):
             return None
 
@@ -911,7 +911,7 @@ def calc_pnl(pos, exit_spot, exit_perp, round_trip_pct,
     # gross runs entry fill → exit fill, and those are real prices off the book:
     # a crossing fill already paid the spread, a resting fill already earned it.
     # round_trip_pct is the *pre-trade estimate* of that same cost and belongs in
-    # the entry gates, not here — subtracting it again charged every trade the
+    # the entry gates, not here, subtracting it again charged every trade the
     # spread twice, which on a wide-spread coin stopped positions out at birth.
     fees_pct    = realised_fee_pct(pos, exit_spot_type, exit_perp_type)
     funding_pct = pos.get("funding_collected_pct", 0.0)
@@ -1069,7 +1069,7 @@ def execute_entry(cs, direction, signal_spread, signal_deviation,
         # Funding pays on notional whether or not the spread alone is profitable,
         # so size off everything both legs can fill. find_optimal_notional stops
         # at the largest spread-profitable size, which is usually far smaller and
-        # on many entries is zero — sizing off it would leave most of the
+        # on many entries is zero, sizing off it would leave most of the
         # funding on the table.
         notional = max(notional, _funding_notional(snap, direction))
 
@@ -1290,7 +1290,7 @@ def funding_entry_check(cs, round_trip, deviation):
 
     One trade, two earners: the funding payment at the stamp, and the basis
     converging back to its mean while we hold. They normally point the same way
-    — funding is positive exactly when the perp is rich, and the trade that
+, funding is positive exactly when the perp is rich, and the trade that
     collects it is the one that profits as that richness decays.
 
     `deviation` is the current spread minus its rolling mean. Reversion helps a
@@ -1308,7 +1308,7 @@ def funding_entry_check(cs, round_trip, deviation):
 
     # get_round_trip_pct() reports 0 until it has five bid-ask samples per leg.
     # Funding entries skip the 500s rolling warm-up on purpose, so without this
-    # they also skip the point where cost becomes knowable — and a coin with a
+    # they also skip the point where cost becomes knowable, and a coin with a
     # 0.16% spread reads as free, which clears every hurdle below trivially.
     if round_trip <= 0:
         return None
@@ -1332,7 +1332,7 @@ def funding_entry_check(cs, round_trip, deviation):
         return None
 
     # Judged as a rate of return, not an absolute. Capital is committed until we
-    # exit, which is the stamp plus however long convergence takes afterwards —
+    # exit, which is the stamp plus however long convergence takes afterwards, 
     # not just the countdown, or a trade entered seconds before a stamp would
     # look near-infinitely attractive.
     hold_hours = max((secs_to_stamp + FUNDING_EXIT_GRACE_SEC / 2.0) / 3600.0, 1.0 / 60.0)
@@ -1486,7 +1486,7 @@ def check_exit_on_tick(cs, snap):
 
         # Stop loss runs before and after the stamp. If the basis has moved
         # against us by more than the funding was ever going to pay, the reason
-        # for holding is gone — waiting for the stamp would only add to it.
+        # for holding is gone, waiting for the stamp would only add to it.
         if net <= -stop_pct:
             with cs.lock:
                 if cs.open_position is None or cs.exit_pending:
@@ -1500,7 +1500,7 @@ def check_exit_on_tick(cs, snap):
                              daemon=True).start()
             return
 
-        # Nothing else closes before the stamp — the payment is why we are here.
+        # Nothing else closes before the stamp, the payment is why we are here.
         if not past_stamp:
             return
 
