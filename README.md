@@ -53,7 +53,8 @@ without it.
 | Funding is real | `\|rate\| ≥ MIN_FUNDING_PCT`, feed under 60 s old |
 | A payment is due soon | within `FUNDING_ENTRY_WINDOW_FRAC` of that coin's own funding cycle |
 | Costs are known | `friction > 0`. Zero means *not measured yet*, not *free* |
-| The gap doesn't outrun the funding | `stop ÷ basis_volatility ≥ MIN_STOP_SIGMAS`. Unmeasured also blocks |
+| The gap doesn't drift past the stop | `stop ÷ gap_deviation ≥ MIN_STOP_SIGMAS` |
+| The gap can't snap past it in one move | `stop ÷ tail_jump ≥ MIN_STOP_JUMPS`. Unmeasured blocks both |
 | The edge beats friction by a margin | `funding ≥ EDGE_FRICTION_MULT × friction`. Entry is decided on funding alone |
 | It's worth the capital | annualised return `≥ MIN_FUNDING_APR` |
 | Not still cooling off | `STOP_COOLDOWN_SEC` since the last stop on this coin |
@@ -114,7 +115,9 @@ refuse, because the fee alone exceeds the edge.
 | `MIN_FUNDING_PCT` | `0.0050` | Smallest rate worth entering for. |
 | `MIN_FUNDING_APR` | `12.0` | Minimum annualised return, at entry and at every stamp. |
 | `EDGE_FRICTION_MULT` | `1.5` | Edge must beat friction by this multiple, not merely exceed it. |
-| `MIN_STOP_SIGMAS` | `2.0` | Skip coins whose gap routinely travels further than funding can pay for. |
+| `MIN_STOP_SIGMAS` | `2.0` | Skip coins whose gap routinely sits further out than the stop. |
+| `MIN_STOP_JUMPS` | `1.5` | Skip coins whose gap can clear the stop in a single lurch. Deviation misses these. |
+| `JUMP_PERCENTILE` | `99` | Which tail of single-step moves counts as a lurch. |
 | `MIN_VOL_SAMPLES` | `30` | Buckets needed before that volatility can be judged. |
 | `FUNDING_ENTRY_WINDOW_FRAC` | `1.0` | Entry window as a fraction of each coin's own funding cycle. |
 | `FUNDING_ENTRY_WINDOW_SEC` | `28800` | Absolute ceiling on that window. |

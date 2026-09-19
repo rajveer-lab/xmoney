@@ -907,3 +907,35 @@ def test_the_table_cannot_disagree_with_the_gate_about_apr(eng, monkeypatch):
     assert yield_apr == pytest.approx(0.0080 * 3 * 365, abs=0.1)   # payload rounds to 1dp
     assert gate_apr > yield_apr          # short hold beats the headline
     assert E.funding_entry_check(cs, friction) is not None
+
+
+def test_a_gap_that_snaps_is_refused_even_when_deviation_looks_calm(eng, monkeypatch):
+    """Deviation describes where the gap sits; jumps describe how violently it
+    moves, and only the second breaches a stop. A gap pinned near zero that
+    occasionally snaps scores *better* on deviation than one drifting gently
+    across a wide band, so deviation alone would prefer the dangerous coin."""
+    monkeypatch.setattr(E, "MIN_FUNDING_PCT", 0.001)
+    monkeypatch.setattr(E, "EDGE_FRICTION_MULT", 1.0)
+    monkeypatch.setattr(E, "MIN_FUNDING_APR", 0.0)
+    monkeypatch.setattr(E, "MIN_STOP_SIGMAS", 0.0)     # isolate the jump filter
+    monkeypatch.setattr(E, "MIN_STOP_JUMPS", 1.5)
+    monkeypatch.setattr(E, "MIN_VOL_SAMPLES", 10)
+    monkeypatch.setattr(E, "STOP_LOSS_FUNDING_MULT", 2.0)
+    monkeypatch.setattr(E, "STOP_LOSS_MIN_PCT", 0.0)
+
+    def with_gaps(gaps):
+        cs = make_coin()
+        for g in gaps:
+            cs.buckets.append({"spread_pct": g})
+        set_funding(cs, 0.10, 600, calm=False)          # stop lands 0.20% away
+        return cs
+
+    # creeps along in tiny steps: a 0.20% stop is far outside any single move
+    creeping = with_gaps([i * 0.002 for i in range(40)])
+    assert E.basis_jump_pct(creeping) < 0.01
+    assert E.funding_entry_check(creeping, 0.001) is not None
+
+    # sits still, then snaps 0.9% at a time: the stop is inside one lurch
+    snapping = with_gaps([0.0] * 30 + [0.9, 0.0, 0.9, 0.0, 0.9, 0.0, 0.9, 0.0, 0.9, 0.0])
+    assert E.basis_jump_pct(snapping) > 0.5
+    assert E.funding_entry_check(snapping, 0.001) is None

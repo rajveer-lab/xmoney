@@ -51,13 +51,17 @@ def _coin_row(cs, now, feed_of):
         last_rec  = cs.last_reconnect_time
     n_buckets = len(cs.buckets)
     fv  = E.funding_view(cs)         # (rate_pct, secs_to_stamp, interval_h) or None
-    vol = E.basis_volatility(cs)     # how far this coin's gap normally travels
+    vol  = E.basis_volatility(cs)    # how far this coin's gap normally sits from its middle
+    jump = E.basis_jump_pct(cs)      # how far it travels in one step, at the tail
     # How many of this coin's own standard deviations the stop sits away. Under
     # MIN_STOP_SIGMAS the gap routinely travels further than funding can pay for.
-    stop_sigmas = None
-    if fv and vol and vol > 0:
+    stop_sigmas = stop_jumps = None
+    if fv:
         _stop = max(E.STOP_LOSS_FUNDING_MULT * abs(fv[0]), E.STOP_LOSS_MIN_PCT)
-        stop_sigmas = _stop / vol
+        if vol and vol > 0:
+            stop_sigmas = _stop / vol
+        if jump and jump > 0:
+            stop_jumps = _stop / jump
 
     spread, sm, pm = _spread_pct(latest)
     # What "ready" means depends on the strategy. The funding engine never waits
@@ -190,6 +194,8 @@ def _coin_row(cs, now, feed_of):
         "funding_in_sec": _f(max(0.0, fv[1]), 0) if fv else None,
         "funding_ivl_h" : fv[2] if fv else None,
         "basis_vol_pct" : _f(vol),
+        "basis_jump_pct": _f(jump),
+        "stop_jumps"    : _f(stop_jumps, 2),
         "stop_sigmas"   : _f(stop_sigmas, 2),
         "ws_spot"       : s_status,
         "ws_perp"       : p_status,
@@ -296,6 +302,7 @@ def build_state(prev_updates=None, prev_ts=None):
             "fee_rt_taker"       : _f(E.round_trip_fee_pct("taker"), 5),
             "fill_fee_type"      : E.FILL_FEE_TYPE,
             "min_stop_sigmas"    : E.MIN_STOP_SIGMAS,
+            "min_stop_jumps"     : E.MIN_STOP_JUMPS,
             "min_funding_pct"    : E.MIN_FUNDING_PCT,
             "min_funding_apr"    : E.MIN_FUNDING_APR,
             "edge_friction_mult" : E.EDGE_FRICTION_MULT,

@@ -232,6 +232,13 @@ MIN_CONVERGENCE_DEV_PCT   = float(os.environ.get("MIN_CONVERGENCE_DEV_PCT", 0.00
 # standard deviations of the coin's own basis: the stop must be at least this
 # many away to be worth entering at all.
 MIN_STOP_SIGMAS           = float(os.environ.get("MIN_STOP_SIGMAS", 2.0))
+# Spread of the gap and size of its jumps are different risks, and the second is
+# the one that takes a position out. A gap that drifts slowly across a wide range
+# scores badly on standard deviation and never hurts us; one that sits tight and
+# then snaps scores well and stops us out. So the stop must also be wide enough
+# to sit outside this coin's tail-sized single move.
+MIN_STOP_JUMPS            = float(os.environ.get("MIN_STOP_JUMPS", 1.5))
+JUMP_PERCENTILE           = float(os.environ.get("JUMP_PERCENTILE", 99.0))
 # Enough buckets to estimate that volatility without waiting for the full window
 MIN_VOL_SAMPLES           = int(os.environ.get("MIN_VOL_SAMPLES", 30))
 
@@ -908,6 +915,23 @@ def basis_volatility(cs):
     spreads = [x["spread_pct"] for x in b[-cs.rolling_win:]]
     return float(np.std(spreads, ddof=1))
 
+def basis_jump_pct(cs):
+    """How far this coin's gap travels in a single step, out at the tail.
+
+    Standard deviation describes where the gap usually sits; this describes how
+    violently it moves, which is what actually breaches a stop. The two come
+    apart badly: a gap drifting across a wide band has high deviation and tiny
+    steps, while one pinned near zero that occasionally snaps has low deviation
+    and huge ones.
+    """
+    b = [x["spread_pct"] for x in cs.buckets]
+    if len(b) < MIN_VOL_SAMPLES:
+        return None
+    steps = [abs(b[i] - b[i - 1]) for i in range(1, len(b))]
+    if not steps:
+        return None
+    return float(np.percentile(steps, JUMP_PERCENTILE))
+
 def get_rolling_stats(cs):
     if len(cs.buckets) < cs.rolling_win:
         return None, None
@@ -1384,6 +1408,12 @@ def funding_entry_check(cs, round_trip):
         return None
     stop_pct = max(STOP_LOSS_FUNDING_MULT * abs(rate_pct), STOP_LOSS_MIN_PCT)
     if (stop_pct / vol) < MIN_STOP_SIGMAS:
+        return None
+
+    # And separately: can one ordinary lurch take us out? A stop narrower than
+    # this coin's tail-sized single move is not a stop, it is a countdown.
+    jump = basis_jump_pct(cs)
+    if jump is None or (jump > 0 and stop_pct < MIN_STOP_JUMPS * jump):
         return None
 
     total_expected = abs(rate_pct) - round_trip

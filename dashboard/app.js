@@ -319,6 +319,8 @@
     { key: "z", label: "Gap σ", r: true, val: (c) => (isNum(c.z) ? Math.abs(c.z) : null) },
     // Under the threshold the gap routinely moves further than funding can pay for.
     { key: "safety", label: "Stop σ", r: true, val: (c) => c.stop_sigmas },
+    // Can one ordinary lurch take us out? Deviation misses this entirely.
+    { key: "jump", label: "Stop / jump", r: true, val: (c) => c.stop_jumps },
     { key: "rt", label: "Friction %", r: true, val: (c) => c.rt_pct },
     { key: "signals", label: "Signals", r: true, val: (c) => c.signals },
     { key: "closed", label: "Trades", r: true, val: (c) => c.closed },
@@ -439,6 +441,17 @@
         "Under " + minSig + " this gap normally travels further than the funding could pay for, so we skip it." +
         (isNum(c.basis_vol_pct) ? "\nGap moves about " + fmtPct(c.basis_vol_pct, 4, false) + " on a typical swing." : "")
       : "Not enough history yet to measure how far this gap normally moves.";
+
+    const minJump = S.state?.config?.min_stop_jumps ?? 1.5;
+    setText(k.jump, isNum(c.stop_jumps) ? c.stop_jumps.toFixed(2) + "x" : "–");
+    setCls(k.jump, "r num " + (!isNum(c.stop_jumps) ? "dim"
+                               : c.stop_jumps >= minJump ? "pos" : "neg"));
+    k.jump.title = isNum(c.stop_jumps)
+      ? "Our stop is " + c.stop_jumps.toFixed(2) + " times this coin's tail-sized single move" +
+        (isNum(c.basis_jump_pct) ? " (" + fmtPct(c.basis_jump_pct, 4, false) + ")" : "") + ".\n" +
+        "Under " + minJump + "x, one ordinary lurch takes the position out before the payment lands, " +
+        "so we skip it.\nDeviation alone misses this: a gap can sit tight and still snap."
+      : "Not enough history yet to see how hard this gap jumps.";
 
     setText(k.rt, isNum(c.rt_pct) && c.rt_pct > 0 ? fmtPct(c.rt_pct, 4, false) : "–");
     setText(k.signals, fmtInt(c.signals));
